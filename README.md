@@ -74,6 +74,9 @@ How much does reasoning buy you in Spire, and on which decisions? Run the agents
 
 ## Prior work
 
+- [Spire 2 modding tutorial](https://github.com/fresh-milkshake/Modding-Tutorial): mod loading, Harmony hooks, Godot `.pck` assets. Pinned to build v0.103.3, may be out of date.
+- [STS2 Modding Assistant MCP](https://www.nexusmods.com/slaythespire2/mods/345): community tool that maps 144 hooks and 175 overridable methods; a guide to where game state lives. Third-party, unverified.
+- No published computer-use or RL agent for Spire 2 found yet.
 
 ## To verify
 
