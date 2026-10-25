@@ -51,6 +51,8 @@ class ClaudeConfig:
     max_tokens: int | None = None  # default: 16000 with thinking on, 2048 with it off
     history_steps: int = 8
     system_prompt: str = SYSTEM_PROMPT
+    # Shrink screenshots to this width before sending (fewer image tokens). None sends full size.
+    send_width: int | None = None
 
 
 def thinking_params(model: str, thinking: str, effort: str) -> dict:
@@ -95,6 +97,8 @@ class ClaudeModel:
     def build_request(self, obs: Observation) -> tuple[dict, float]:
         width, height = obs.screenshot.size
         scale = fit_scale(width, height)
+        if self.config.send_width:
+            scale = min(scale, self.config.send_width / width)
         image = obs.screenshot
         if scale < 1.0:
             image = image.resize((round(width * scale), round(height * scale)), Image.LANCZOS)

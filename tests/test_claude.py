@@ -134,3 +134,11 @@ def test_thinking_summary_is_kept(frame):
     decision = model.decide(Observation(1, frame, []))
     assert decision.reasoning == "Enemy intends 12; block first."
     assert decision.thought == "Defend."
+
+
+def test_send_width_shrinks_and_maps_back(frame):
+    client = FakeClient(message([tool("left_click", {"coordinate": [480, 270]})]))
+    model = ClaudeModel(ClaudeConfig(send_width=960), client=client)
+    decision = model.decide(Observation(1, frame, []))
+    assert "Screenshot is 960x540" in client.requests[0]["messages"][0]["content"][1]["text"]
+    assert decision.actions == [Click(640, 360)]
