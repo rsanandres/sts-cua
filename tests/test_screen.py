@@ -64,3 +64,35 @@ def test_x11_capture_and_click(xvfb):
     assert screen.pointer() == (321, 123)
     screen.perform(Drag(10, 10, 640, 360))
     assert screen.pointer() == (640, 360)
+
+
+def test_click_target_registers_hits(xvfb, tmp_path):
+    import json
+    import sys
+
+    pytest.importorskip("pygame")
+    from sts_cua.screen import X11Screen
+
+    out = tmp_path / "target.json"
+    app = subprocess.Popen(
+        [sys.executable, "tools/click_target.py", "--out", str(out)],
+        env={**os.environ, "DISPLAY": xvfb},
+    )
+    try:
+        for _ in range(50):
+            if out.exists():
+                break
+            time.sleep(0.1)
+        time.sleep(0.5)  # first frame drawn
+        screen = X11Screen(xvfb)
+        for _ in range(2):
+            x, y, w, h = json.loads(out.read_text())["button"]
+            screen.perform(Click(x + w // 2, y + h // 2))
+            time.sleep(0.3)
+        screen.perform(Click(5, 700))
+        time.sleep(0.3)
+        score = json.loads(out.read_text())
+        assert (score["hits"], score["misses"]) == (2, 1)
+    finally:
+        app.terminate()
+        app.wait(timeout=5)

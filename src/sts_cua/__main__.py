@@ -27,6 +27,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--settle", type=float, default=1.0, help="seconds to wait after each step")
     parser.add_argument("--runs-dir", default="runs")
     parser.add_argument("--game-build", default="unknown", help="Spire 2 build, recorded in the run log")
+    parser.add_argument("--prompt-file", help="replace the Spire system prompt, e.g. prompts/click_target.txt")
     args = parser.parse_args(argv)
 
     screen = X11Screen(args.display)
@@ -35,15 +36,20 @@ def main(argv: list[str] | None = None) -> None:
     else:
         from .models.claude import ClaudeConfig, ClaudeModel
 
-        model = ClaudeModel(ClaudeConfig(
+        config = ClaudeConfig(
             model=args.model, thinking=args.thinking, effort=args.effort, history_steps=args.history_steps,
-        ))
+        )
+        if args.prompt_file:
+            with open(args.prompt_file, encoding="utf-8") as f:
+                config.system_prompt = f.read().strip()
+        model = ClaudeModel(config)
 
     log = RunLog(args.runs_dir, meta={
         "model": model.name,
         "display": args.display,
         "screen_size": list(screen.size),
         "game_build": args.game_build,
+        "prompt_file": args.prompt_file,
         "max_steps": args.max_steps,
         "max_cost_usd": args.max_cost,
     })

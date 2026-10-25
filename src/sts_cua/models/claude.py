@@ -50,6 +50,7 @@ class ClaudeConfig:
     effort: str = "low"
     max_tokens: int | None = None  # default: 16000 with thinking on, 2048 with it off
     history_steps: int = 8
+    system_prompt: str = SYSTEM_PROMPT
 
 
 def thinking_params(model: str, thinking: str, effort: str) -> dict:
@@ -113,7 +114,7 @@ class ClaudeModel:
         request = {
             "model": self.config.model,
             "max_tokens": self.config.max_tokens or (16000 if self.config.thinking == "on" else 2048),
-            "system": [{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
+            "system": [{"type": "text", "text": self.config.system_prompt, "cache_control": {"type": "ephemeral"}}],
             "tools": [{
                 "type": "computer_toolset_20260801",
                 "configs": {member: {"enabled": False} for member in _DISABLED_MEMBERS},

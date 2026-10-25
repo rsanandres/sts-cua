@@ -107,6 +107,14 @@ python -m sts_cua --display :99 --model claude-sonnet-5-5 --thinking on --effort
 pytest
 ```
 
+First live test, before Spire: a green button that jumps after every hit, scored in `target.json`.
+
+```
+DISPLAY=:99 .venv/bin/python tools/click_target.py --out target.json &
+.venv/bin/python -m sts_cua --display :99 --model claude-haiku-5-5 --thinking off --prompt-file prompts/click_target.txt --max-steps 5 --max-cost 0.05
+cat target.json
+```
+
 Claude needs `ANTHROPIC_API_KEY` (or an `ant auth login` profile). Each run writes `runs/<timestamp>/` with `meta.json`, `steps.jsonl` (thought, reasoning summary, proposed and executed actions, tokens, cost per step), a screenshot per step, and `summary.json`. A run stops at `--max-steps`, at `--max-cost` USD, after 3 steps in a row with no action, or after 3 errors in a row.
 
 Code map:
