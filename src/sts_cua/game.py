@@ -6,7 +6,10 @@ Facts found on Raph's machine (WSL2, Spire 2 build 23811903, v0.107.1):
   still be running so Steamworks can check ownership.
 - GALLIUM_DRIVER=d3d12 + --rendering-driver opengl3 renders on the GPU.
 - The first frame lays out wrong until the window is resized by one pixel and back.
-- SIGTERM is ignored; quit through the in-game menu.
+- SIGTERM is ignored; quit through the in-game menu. The process can still hang after
+  Quit -> Yes once saves are written, so quit_game force-kills it after a timeout.
+- The first click after the window gains focus only focuses it; focus() clicks a
+  harmless spot first.
 """
 
 from __future__ import annotations
@@ -114,11 +117,18 @@ def start(config: GameConfig | None = None, settle: float = 6.0) -> GameConfig:
     time.sleep(settle)
     fix_layout(config)
     time.sleep(4)  # menu fade-in
+    focus(config)
     return config
 
 
+def focus(config: GameConfig) -> None:
+    """Click the empty top-left corner so the next click reaches the game, not the window manager."""
+    X11Screen(config.display).perform(Click(5, 360))
+    time.sleep(0.3)
+
+
 def quit_game(config: GameConfig, timeout: float = 15) -> None:
-    """Quit from the main menu: Quit, then Yes."""
+    """Quit from the main menu: Quit, then Yes. Force-kill if the process hangs on exit."""
     screen = X11Screen(config.display)
     screen.perform(Click(*QUIT_BUTTON))
     time.sleep(1)
@@ -128,4 +138,4 @@ def quit_game(config: GameConfig, timeout: float = 15) -> None:
         if not is_running():
             return
         time.sleep(0.5)
-    raise TimeoutError("game still running after Quit -> Yes")
+    subprocess.run(["pkill", "-KILL", "-x", "SlayTheSpire2"], check=False)

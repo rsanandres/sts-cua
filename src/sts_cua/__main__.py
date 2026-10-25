@@ -29,6 +29,9 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--game-build", default="unknown", help="Spire 2 build, recorded in the run log")
     parser.add_argument("--goal", help="goal shown to the model every step, e.g. 'Start a singleplayer run'")
     parser.add_argument("--send-width", type=int, help="shrink screenshots to this width before sending to Claude, e.g. 960")
+    parser.add_argument("--state-url", default="http://localhost:15526/api/v1/singleplayer",
+                        help="STS2MCP game state endpoint, logged each step as ground truth (never shown to the model)")
+    parser.add_argument("--no-state", action="store_true", help="don't read game state from the mod")
     parser.add_argument("--prompt-file", help="replace the Spire system prompt, e.g. prompts/click_target.txt")
     args = parser.parse_args(argv)
 
@@ -58,9 +61,14 @@ def main(argv: list[str] | None = None) -> None:
         "max_steps": args.max_steps,
         "max_cost_usd": args.max_cost,
     })
+    state_fn = None
+    if not args.no_state:
+        from .state import fetch_state, summarize
+
+        state_fn = lambda: summarize(fetch_state(args.state_url))  # noqa: E731
     summary = run(model, screen, log, LoopConfig(
         max_steps=args.max_steps, max_cost_usd=args.max_cost, settle_seconds=args.settle,
-    ))
+    ), state_fn=state_fn)
     print(json.dumps({"run_dir": str(log.dir), **summary}, indent=2))
 
 

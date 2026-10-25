@@ -94,3 +94,20 @@ def test_waiting_counts_as_idle(tmp_path, frame):
     summary = run(model, FakeScreen([frame]), log, LoopConfig(max_steps=10, settle_seconds=0, max_idle_steps=3))
     assert summary["end_reason"] == "idle"
     assert summary["steps"] == 3
+
+
+def test_state_is_logged_not_shown(tmp_path, frame):
+    seen = []
+
+    class Peeker:
+        name = "peeker"
+
+        def decide(self, obs):
+            seen.append(vars(obs).keys())
+            return Decision(thought="", actions=[Click(0, 0)])
+
+    log = RunLog(tmp_path, meta={})
+    run(Peeker(), FakeScreen([frame]), log, LoopConfig(max_steps=1, settle_seconds=0),
+        state_fn=lambda: {"state_type": "monster", "floor": 1})
+    assert "state" not in seen[0]
+    assert read_steps(log)[0]["state"] == {"state_type": "monster", "floor": 1}

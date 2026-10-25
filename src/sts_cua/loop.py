@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from typing import Callable
 
 from .actions import Wait
 from .models.base import HistoryEntry, Model, Observation
@@ -20,7 +21,14 @@ class LoopConfig:
     max_errors: int = 3  # stop after this many model or input errors in a row
 
 
-def run(model: Model, screen: Screen, log: RunLog, config: LoopConfig | None = None) -> dict:
+def run(
+    model: Model,
+    screen: Screen,
+    log: RunLog,
+    config: LoopConfig | None = None,
+    state_fn: Callable[[], dict | None] | None = None,
+) -> dict:
+    """state_fn, if given, returns the true game state each step. It is logged, never shown to the model."""
     config = config or LoopConfig()
     history: list[HistoryEntry] = []
     idle = errors = 0
@@ -28,10 +36,11 @@ def run(model: Model, screen: Screen, log: RunLog, config: LoopConfig | None = N
 
     for step in range(1, config.max_steps + 1):
         screenshot = screen.capture()
+        state = state_fn() if state_fn else None
         try:
             decision = model.decide(Observation(step, screenshot, history))
         except Exception as exc:  # API or adapter failure: log it and keep going, up to max_errors
-            log.step(step, screenshot, None, [], error=f"model: {exc!r}")
+            log.step(step, screenshot, None, [], error=f"model: {exc!r}", state=state)
             errors += 1
             if errors >= config.max_errors:
                 end_reason = "model_errors"
@@ -47,7 +56,7 @@ def run(model: Model, screen: Screen, log: RunLog, config: LoopConfig | None = N
                 break
             executed.append(action)
 
-        log.step(step, screenshot, decision, executed, error)
+        log.step(step, screenshot, decision, executed, error, state=state)
         history.append(HistoryEntry(step, decision.thought, executed))
 
         if decision.done:

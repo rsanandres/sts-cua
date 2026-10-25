@@ -141,6 +141,19 @@ tools/launch_sts2.sh /tmp/sts2.log      # Xvfb :99 + game on the GPU + layout fi
 
 Game settings for agent runs (machine `settings.save` is not cloud-synced; profile prefs are, so change those in-game): 1280x720 windowed at 0,0, vsync off, 30 fps cap, MSAA off, all volumes 0, skip intro. Agent profile: fast mode, no screen shake, no text effects, hand card numbers shown, gameplay data upload off. Keyboard: `1`-`0` select cards, `E` confirm, `Enter` select, `M` map, `Escape` cancel.
 
+## Game state mod (STS2MCP)
+
+[STS2MCP](https://github.com/Gennadiyev/STS2MCP) (MIT) runs a local API on `localhost:15526`. Release 0.4.0 breaks on Spire 2 v0.107, so we build `main` @ 55e0648 (which has the v0.107 fix) with the .NET 9 SDK against the game's own DLLs:
+
+```
+DOTNET_ROOT=~/.dotnet ~/.dotnet/dotnet build STS2_MCP.csproj -c Release \
+  -p:STS2GameDir="$HOME/.steam/debian-installation/steamapps/common/Slay the Spire 2" -o out/STS2_MCP
+```
+
+Copy `STS2_MCP.dll` + `STS2_MCP.json` into `<game>/mods/` and accept the "Load Mods?" dialog. With mods on, the game uses separate `modded/profileN` saves, so the agent's modded Profile 3 can't touch normal saves.
+
+The harness only reads `GET /api/v1/singleplayer` (`src/sts_cua/state.py`) and logs a summary per step as ground truth (screen type, floor, HP, energy, hand, enemies and intents). The agent never sees it; it stays pixel-only. Never call the mod's POST endpoints from the harness.
+
 ## Status
 
-Harness and Claude adapter built and tested against a virtual display with a scripted model. Not yet run against the live API or the game.
+Harness runs Spire 2 end to end on Raph's PC. Haiku 5.5 won the first fight of Act 1 (14 steps, $0.0056, run 20261025T164617Z). Next: the supervisor for back-to-back full runs.
