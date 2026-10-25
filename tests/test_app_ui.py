@@ -171,3 +171,31 @@ def test_screens(stub, browser, tmp_path, name):
 
     assert errors == []
     context.close()
+
+
+@pytest.mark.parametrize("name", list(VIEWPORTS))
+def test_coop_section(stub, browser, tmp_path, name):
+    base, state = stub
+    context, page, errors = open_page(browser, base, VIEWPORTS[name])
+    page.goto(f"{base}/#run")
+    page.locator("#coop-form").wait_for()
+    # Fastest settings by default.
+    assert page.locator("#coop-model").input_value() == "claude-haiku-5-5"
+    assert page.locator("#coop-thinking").input_value() == "off"
+    assert page.locator("#coop-rules").is_checked()
+    page.fill("#coop-cost", "2.5")
+    page.click("#coop-start")
+    page.wait_for_function("document.getElementById('toast').textContent.includes('Co-op agent started')")
+    path, body = next((p, b) for p, b in reversed(state.calls) if p == "/api/coop/start")
+    assert body == {"model": "claude-haiku-5-5", "thinking": "off", "effort": "low", "max_cost": 2.5,
+                    "idle_minutes": 30, "rules": True, "game_build": None}
+    assert page.locator("#coop-cost").input_value() == "2.50"
+    page.click("#coop-stop")
+    page.wait_for_function("document.getElementById('coop-status').textContent.includes('Stopping')")
+    assert ("/api/coop/stop", {}) in state.calls
+    page.select_option("#coop-model", "qwen3-vl-8b")
+    assert page.locator("#coop-thinking").is_disabled()
+    no_horizontal_scroll(page)
+    page.screenshot(path=str(shots_dir(tmp_path) / f"ui-coop-{name}.png"), full_page=True)
+    assert errors == []
+    context.close()

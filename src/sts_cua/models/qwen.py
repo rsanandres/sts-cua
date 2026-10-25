@@ -46,6 +46,7 @@ from typing import Callable
 from PIL import Image
 
 from ..actions import Action, Click, Drag, Key, MouseMove, Scroll, TypeText, Wait, describe
+from .. import coop as _coop
 from .base import Decision, Observation, Usage
 from .claude import SYSTEM_PROMPT as _CLAUDE_PROMPT
 
@@ -185,6 +186,7 @@ class QwenConfig:
     top_logprobs: int = 0  # alternatives per token, 0 to 20
     return_token_ids: bool = True  # vLLM extension; servers without it ignore the field
     timeout: float = 120.0
+    coop: bool = False  # co-op with a human teammate: coop.PROMPT goes after the system prompt
 
 
 # (url, payload, headers, timeout) -> response JSON. Swapped out in tests.
@@ -380,7 +382,8 @@ class QwenModel:
         self._transport = transport or post_json
 
     def system_text(self) -> str:
-        return self.config.system_prompt + TOOLS_TEXT + RESPONSE_FORMAT
+        coop = _coop.PROMPT if self.config.coop else ""
+        return self.config.system_prompt + coop + TOOLS_TEXT + RESPONSE_FORMAT
 
     def user_text(self, obs: Observation) -> str:
         size = obs.screenshot.size

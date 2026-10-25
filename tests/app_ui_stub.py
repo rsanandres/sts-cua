@@ -28,7 +28,7 @@ TOKEN = "test-token"
 COOKIE = "sts_cua_token"
 SAFE = re.compile(r"^[\w.-]+$")
 XSS = '<script>window.__xss = 1</script><img src=x onerror="window.__xss = 2">'
-LOGS = ("steam", "game", "vllm", "supervisor", "app")
+LOGS = ("steam", "game", "vllm", "supervisor", "app", "coop")
 CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8"}
 
 NOW = datetime(2026, 10, 25, 18, 0, tzinfo=timezone.utc)
@@ -144,6 +144,7 @@ class Stub:
         self.live_step = 5
         self.busy_polls = 0
         self.vllm = True
+        self.coop = False
         self.images: dict[str, bytes] = {}
 
     def image(self, key: str) -> bytes:
@@ -166,6 +167,7 @@ class Stub:
             "budget": {"date": "2026-10-25", "spent_usd": 0.42, "cap_usd": 2.0},
             "mod": {"reachable": True, "state_type": "monster", "act": 1, "floor": 3, "hp": 61, "max_hp": 80},
             "busy": busy,
+            "coop": proc(self.coop, 5, 505),
         }
 
     def live(self) -> dict:
@@ -317,6 +319,14 @@ def make_handler(stub: Stub, require_auth: bool = True):
             if path == "/api/runs/stop":
                 stub.running = False
                 return self.send_json({"stopped": True})
+            if path == "/api/coop/start":
+                if stub.coop:
+                    return self.send_json({"error": "a co-op session is already running"}, 409)
+                stub.coop = True
+                return self.send_json({"started": True, "pid": 5050})
+            if path == "/api/coop/stop":
+                was, stub.coop = stub.coop, False
+                return self.send_json({"stopped": True, "pids": [5050] if was else []})
             if path == "/api/memory/reflect":
                 if not SAFE.match(str(body.get("run_id", ""))):
                     return self.send_json({"error": "bad run_id"}, 400)

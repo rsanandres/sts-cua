@@ -14,6 +14,7 @@ import re
 from difflib import SequenceMatcher
 
 from .. import pricing
+from ..score import run_mode
 from ..score import score_run as score_outcome
 from ..actions import Click, Drag, Key, MouseMove, Scroll, TypeText, Wait, describe
 from ..models.base import Usage
@@ -254,6 +255,8 @@ def reflect(store: NoteStore, run: Run, client=None, model: str = DEFAULT_MODEL)
     """Score the run, ask Claude for delta ops, apply them, save the store, log the call. Skips reset runs."""
     if run.meta.get("kind") == "reset":
         return {"skipped": "reset run", "results": []}
+    if run_mode(run.meta) == "coop":
+        return {"skipped": "co-op run", "results": []}
     score = score_run(store, run)
     store.save()  # keep the scores even if the call below fails; memory_score.json marks the run scored
     request = build_request(store, run, model)

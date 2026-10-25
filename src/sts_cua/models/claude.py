@@ -18,6 +18,7 @@ from dataclasses import dataclass
 import anthropic
 from PIL import Image
 
+from .. import coop as _coop
 from .. import pricing
 from ..actions import Action, Click, Drag, Key, MouseMove, Scroll, TypeText, Wait, describe
 from .base import Decision, Observation, Usage
@@ -80,6 +81,9 @@ class ClaudeConfig:
     # Shrink screenshots to this width before sending (fewer image tokens). None sends full size.
     send_width: int | None = None
     goal: str | None = None
+    # Co-op with a human teammate: appends coop.PROMPT to the system prompt. Off leaves the
+    # single-player prompt, and so its cached prefix, byte for byte the same.
+    coop: bool = False
 
 
 def thinking_params(model: str, thinking: str, effort: str) -> dict:
@@ -146,10 +150,11 @@ class ClaudeModel:
         goal_text = f"Goal: {self.config.goal}\n\n" if self.config.goal else ""
         # Notes change per step, so they live in the user message, after the cached tools + system prefix.
         notes_text = f"{obs.notes}\n\n" if obs.notes else ""
+        system = self.config.system_prompt + (_coop.PROMPT if self.config.coop else "")
         request = {
             "model": self.config.model,
             "max_tokens": self.config.max_tokens or (16000 if self.config.thinking == "on" else 2048),
-            "system": [{"type": "text", "text": self.config.system_prompt, "cache_control": {"type": "ephemeral"}}],
+            "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
             "tools": [{
                 "type": "computer_toolset_20260801",
                 "configs": {member: {"enabled": False} for member in _DISABLED_MEMBERS},

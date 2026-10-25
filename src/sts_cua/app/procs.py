@@ -25,6 +25,8 @@ AGENT_PATTERN = r"python[0-9.]* -m sts_cua(\.supervisor|\.memory)?( |$)"
 # A game-playing run, for /api/live: the harness or the supervisor.
 RUN_PATTERN = r"python[0-9.]* -m sts_cua(\.supervisor)?( |$)"
 SUPERVISOR_PATTERN = r"python[0-9.]* -m sts_cua\.supervisor( |$)"
+# A co-op session: the harness with --coop (python -m sts_cua ... --coop).
+COOP_PATTERN = r"python[0-9.]* -m sts_cua .*--coop( |$)"
 VLLM_PATTERN = "vllm serve|vllm.entrypoints|llama-server"
 
 
@@ -36,6 +38,7 @@ def watches(display: str = ":99") -> dict[str, list[str]]:
         "game": ["-x", "SlayTheSpire2"],
         "vllm": ["-f", VLLM_PATTERN],
         "supervisor": ["-f", SUPERVISOR_PATTERN],
+        "coop": ["-f", COOP_PATTERN],
     }
 
 

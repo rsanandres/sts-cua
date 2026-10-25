@@ -52,6 +52,9 @@ class Decision:
     usage: Usage = field(default_factory=Usage)
     # Provider response, kept for the run log.
     raw: dict | None = None
+    # Who decided: "model", or "rule" for a co-op general rule (sts_cua.rules) taken with no model call.
+    source: str = "model"
+    rule: str | None = None  # the rule that acted, or whose directive the model followed
 
 
 class Model(Protocol):

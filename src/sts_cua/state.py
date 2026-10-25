@@ -30,6 +30,8 @@ Schema facts, read in that commit:
   a run, return `state_type` "menu" with `menu_screen` "tutorial_prompt", "tutorial" or
   "popup" and no `run`.
 - `docs/raw-full.md`: the same schema with examples.
+- Co-op lobbies and runs (character select with a `lobby` block, or the separate
+  `/api/v1/multiplayer` endpoint) are marked `multiplayer: true`; sts_cua.coop reads them.
 - Not in the singleplayer state: the seed, and whether a run was won. The saved run
   history (`win`, `was_abandoned`, `seed`) is only in `GET /api/v1/compendium`
   (`McpMod.Compendium.cs`, `BuildRunHistoryEntry`); see history.py.
@@ -63,6 +65,8 @@ def summarize(state: dict | None) -> dict | None:
     if not state:
         return None
     out = {"state_type": state.get("state_type")}
+    if state.get("game_mode") == "multiplayer" or isinstance(state.get("lobby"), dict):
+        out["multiplayer"] = True  # a co-op run or lobby; sts_cua.coop.summarize keeps the details
     if state.get("menu_screen"):
         out["menu_screen"] = state["menu_screen"]
         out["menu_options"] = [_option_name(o) for o in state.get("options") or []]

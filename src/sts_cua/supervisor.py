@@ -2,6 +2,9 @@
 
     python -m sts_cua.supervisor --display :99 --model claude-haiku-5-5 --daily-budget 2.00
 
+Solo only: the session stops ("coop_session") when the mod shows a co-op lobby or run, and
+co-op runs (meta mode "coop", from python -m sts_cua --coop) are never scored here.
+
 Before each run the game must be on the main menu with no saved run; if it isn't, a
 short reset run (its own run dir, meta kind "reset") asks the model to get there. Each
 game run stops when the mod state shows the run is over (score.RunOverDetector), then
@@ -32,6 +35,7 @@ from pathlib import Path
 from typing import Callable
 from zoneinfo import ZoneInfo
 
+from .coop import in_session as in_coop_session
 from .history import DEFAULT_URL as HISTORY_URL
 from .history import HistoryEntry, entry_ids, fetch_history, find_run, run_outcome
 from .loop import LoopConfig, run
@@ -233,6 +237,9 @@ def supervise(
         state = wait_for_state()
         if state is None:
             return Session(entries, "no_state")
+        if in_coop_session(state):
+            # Solo only: never reset, or play in, a co-op lobby or run (python -m sts_cua --coop does co-op).
+            return Session(entries, "coop_session")
         if not at_main_menu(state):
             echo(f"not at the main menu ({state.get('state_type')}); resetting")
             model, screen = model_factory(RESET_GOAL), screen_factory()

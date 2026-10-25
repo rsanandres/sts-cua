@@ -137,6 +137,7 @@ Code map:
 - `src/sts_cua/screen.py`: `X11Screen` (mss capture, xdotool input) and `FakeScreen` for tests.
 - `src/sts_cua/runlog.py`, `src/sts_cua/pricing.py`: run logs and per-step cost.
 - `src/sts_cua/memory/`: lessons carried between runs (see "Memory across runs").
+- `src/sts_cua/coop.py`, `src/sts_cua/rules.py`: co-op mode and its general rules (see "Co-op with Raph").
 
 ## Run Slay the Spire 2
 
@@ -207,6 +208,34 @@ python -m sts_cua.memory reflect runs/<run> --dry-run   # print the request, no 
 - **Delivery:** the notes go into the per-step user message, after the cached tools and system prompt, labelled as lessons from earlier runs.
 - **Reflect** (`memory/reflect.py`): one call with a digest of the run (per-combat HP table, outcome, wasted or erroring steps, the agent's thoughts at key moments, the notes it was shown with their stats). It returns delta operations only: ADD (at most 3, deduped against notes with the same keys), UPDATE, DOWNVOTE, RETIRE. Cost goes to `memory_reflect.json` in the run directory.
 - **Validation gate** (`memory/score.py`): per note, loss when shown vs hidden (HP lost per combat as a share of max HP for enemy, card and strategy notes; share of wasted steps per screen visit for ui, pitfall and event notes). Utility = hidden minus shown, with a simple Welch interval. Probation becomes active when the lower bound is above 0 after 5 shown and 3 hidden units; any note is retired when the upper bound is below 0. Results go to `memory_score.json`. Fights come from `sts_cua.score.combats`, and reset runs (meta `kind: "reset"`) are neither scored nor reflected on. With `--memory`, the supervisor scores and reflects on every game run itself.
+
+## Co-op with Raph
+
+The agent plays a run with Raph as a teammate. Raph plays the Windows build on his own Steam account and hosts; the agent plays on its own account (budthud) in WSL, with the game on Xvfb :99 and STS2MCP loaded (it sets `affects_gameplay: false`, so the host doesn't need it). Co-op facts and setup: [docs/hosting.md](docs/hosting.md#co-op-why-a-second-copy); screens and mod fields: [docs/action-space.md](docs/action-space.md#co-op).
+
+Joining (the agent never accepts invites itself; that happens in Steam):
+
+1. Start the agent's game first (`tools/launch_sts2.sh` or the app's Stack up), so it runs on Xvfb with the GPU.
+2. Raph hosts on Windows (Multiplayer > Host) and invites budthud from Windows Steam or the lobby's invite button.
+3. Raph (or the PC session) accepts the invite in the WSL Steam window. Check the agent's screen (app: fresh capture) shows Raph's lobby.
+4. Start the agent once its game shows the lobby:
+
+```
+python -m sts_cua --display :99 --coop                      # Haiku 5.5, thinking off, rules on
+python -m sts_cua --display :99 --coop --model claude-sonnet-5-5 --thinking on --max-cost 2
+```
+
+or the app's Run tab, "Co-op" (`POST /api/coop/start`), with a Stop button. Later options, not built: the in-game Multiplayer > Join list of friends with open lobbies, which the agent could click itself; a Steam `steam://` join URL (unverified for Spire 2). The mod's `menu_select join_<id>` would also work, but the harness never calls the mod's POST endpoints.
+
+How a co-op run differs from solo:
+
+- **Speed.** Defaults are the fastest settings: Haiku 5.5 with thinking off, a 4-step history, 0.3 s settle, 5,000 steps.
+- **General rules first** (`src/sts_cua/rules.py`). Before the model, a table of rules reads the mod's state and decides the common cases: wait while it's not the agent's move (enemy turn, after End Turn, ready in the lobby, after voting), with no model call and polling the mod every 0.5 s; end the turn with `e` when no card in hand is playable; vote last on the map and on shared events, matching the majority of the other players (2 to 4 players), ties on the map by a type preference (rest first at low HP); bid on a treasure relic nobody else picked; take gold and potions; proceed when nothing is left; ready up in the lobby. Rules that need a click whose position isn't confirmed yet give the model a one-line instruction instead of acting. Each step logs `source: "rule"` (no model call) or `source: "model"`, plus `rule` when one fired. `--no-rules` asks the model every step. Where a rule fires, the mod's state decides or informs the step, so co-op isn't pixel-only.
+- **Prompt.** Claude and Qwen get a co-op addendum after the system prompt (`coop.PROMPT`): teammate, end your turn, vote, leave the teammate's choices alone, never leave the lobby, wait when it's not your move. With `--coop` off the prompt, and so the cached prefix, is unchanged.
+- **Waiting is normal.** While `coop.waiting(state)` names a reason, wait-only steps don't count toward the idle stop and an unchanged screen doesn't count as stuck (the step logs `waiting`). The run still stops after `--coop-idle-minutes` (30) with no action of the agent's that changed the screen, at `--max-cost`, or when the run is over (game over, or back at a menu).
+- **Not solo data.** `meta.json` has `mode: "coop"`. `score.run_mode(meta)` reads it; memory scoring and reflection skip co-op runs; the supervisor stays solo-only and stops (`coop_session`) if it finds a co-op lobby or run. The app marks co-op runs in Results.
+
+To check on the PC: the waiting and vote screens, whether a teammate's map vote is visible on the agent's screen, the lobby confirm position, whether pressing End Turn again takes the end turn back, and that game over in co-op reads as the `NGameOverScreen` overlay.
 
 ## Control app
 

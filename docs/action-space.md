@@ -30,7 +30,7 @@ Every step in the run log gets one of these labels, so we can count inspects per
 |---|---|---|
 | Profile name, "Click to edit" | top-left | Navigation (don't use; the agent stays on Profile 3) |
 | Singleplayer | ~517,505 | Commit |
-| Multiplayer | | Off limits |
+| Multiplayer | | Off limits in solo runs; co-op is below |
 | Settings | | Off limits during runs |
 | Quit | ~517,605, then Yes ~750,482 | Harness only |
 
@@ -102,6 +102,73 @@ Seen in run 20261025T090109Z (Haiku vs Nibbit, first fight of Act 1).
 ## Mod state types seen so far
 
 `GET /api/v1/singleplayer` `state_type` values met in runs: `menu`, `map`, `monster` (combat), `rewards`, `card_reward`, `event`. The run log keeps a summary per step.
+
+## Co-op
+
+The agent joins Raph's lobby as a client (`python -m sts_cua --coop`, see the README). Nothing in this section has been seen on Raph's machine yet, so every row is **unverified** unless it says otherwise. Mod facts are read in STS2MCP main @ 55e0648 (`McpMod.StateBuilder.cs`, `McpMod.MultiplayerState.cs`, `docs/raw-full.md`); rules facts are from third-party guides ([allthings.how](https://allthings.how/slay-the-spire-2-co-op-multiplayer-every-mechanic-and-rule-explained/), [brokenbuilds.gg](https://brokenbuilds.gg/slay-the-spire-2/guides/slay-the-spire-2-co-op-guide)), which disagree in places.
+
+### Mod endpoints
+
+- Lobby and menus come from `GET /api/v1/singleplayer`: no run is in progress yet. During a co-op run that endpoint answers 409 and `GET /api/v1/multiplayer` answers instead (and 409 outside a run). `coop.fetch_state` tries multiplayer, then singleplayer.
+- The harness only reads. The mod's multiplayer POST actions (`end_turn`, `undo_end_turn`, `menu_select join_<id>`, ...) are never called.
+
+### Lobby
+
+| Element | Kind | Mod fields | Status |
+|---|---|---|---|
+| Main menu > Multiplayer: Host / Join / Load / Abandon, Back | Navigation | `menu_screen` "multiplayer"; "multiplayer_host" for Standard / Daily / Custom | mod source |
+| Join: a list of Steam friends with open lobbies, Refresh, Back | Commit (joins) | `menu_screen` "multiplayer_join", `friends` [{name, player_id}] | mod source; the agent doesn't use it yet (Steam invite instead) |
+| Character select with the lobby: pick a character, confirm (embark) to ready up | Commit | `lobby` {type client, is_local_ready, all_ready, players [{is_local, character_id, is_ready}]} | mod source. Confirm is ~1225,518 in solo (confirmed); same screen class in co-op, position unverified |
+| Unready: takes back ready | Commit | option "unready" | mod source |
+| Back: **leaves the lobby** | Off limits | option "back" | mod source |
+| Invite button (host side) | Raph only | | patch v0.100.0 mentions it |
+| Load lobby (resume a saved co-op run): confirm to ready, players show connected and ready | Commit | `menu_screen` "multiplayer_load_lobby" | mod source |
+
+### Combat
+
+| Element | Kind | Mod fields | Status |
+|---|---|---|---|
+| Everyone plays at the same time with their own energy and hand; the turn passes once every player pressed End Turn | | `battle.all_players_ready`, `players[].is_ready_to_end_turn` | guides + mod source |
+| `e` / End Turn after your turn: you are ready and wait | Commit | local `is_ready_to_end_turn` true | `e` confirmed in solo; the waiting look on screen is unverified |
+| Pressing End Turn again while waiting | Avoid | the mod has `undo_end_turn`, so the game can take an end turn back | the in-game input for it is unverified |
+| Enemy turn | Wait | `battle.turn` != "player" or `is_play_phase` false | mod source |
+| A player at 0 HP is knocked out for the rest of the fight and comes back at 1 HP after it | Wait | `players[].is_alive` | guide |
+
+### Map vote
+
+| Element | Kind | Mod fields | Status |
+|---|---|---|---|
+| Every player clicks a reachable node to vote; the game then picks the path (a roulette weighted by votes per one guide, random when split per another) | Commit | `map.votes` [{is_local, voted, vote_col, vote_row}], `all_voted`, `next_options` (sorted by column) | mod source; tie behaviour unverified |
+| What a teammate's vote looks like on screen (a marker or portrait on the node) | Inspect | | unverified: confirm on the PC so the model can see it without the mod |
+| Map drawings by any player (arrows, scribbles) stay for the act | Inspect | | guide; patch v0.100.0 can turn them off |
+
+The agent votes last and follows the majority of the other players' votes (`sts_cua.rules`); Raph votes first.
+
+### Per-player and shared screens
+
+| Screen | Shared? | Mod fields | Status |
+|---|---|---|---|
+| Card rewards, gold, potions | Per player | `rewards.items` | guides |
+| Shop | Per player (own stock and gold) | | guides |
+| Rest site | Per player; Mend heals a teammate | | guides |
+| Event | Usually per player; some are shared votes | `event.is_shared`, `event.votes`, `all_voted` | mod source |
+| Treasure | One relic each; a contested relic is settled by an automatic duel | `treasure.is_bidding_phase`, `bids`, `all_bid` | guide + mod source |
+| Game over | | no explicit check in the multiplayer state; read as `overlay` "NGameOverScreen" (inferred) | unverified |
+
+### Waiting states
+
+`coop.waiting(state)` names why waiting is normal; the loop then doesn't count wait-only steps as idle or unchanged screens as stuck, and the `wait_turn` rule waits without a model call, re-reading the mod every 0.5 s.
+
+| Reason | When |
+|---|---|
+| `lobby_ready`, `lobby_starting` | ready in the lobby; everyone ready |
+| `teammate_end_turn`, `turn_ending` | the agent ended its turn; every player has |
+| `enemy_turn` | not the players' play phase |
+| `knocked_out` | the agent's character is down this fight |
+| `teammates_voting` | a vote (map, shared event, treasure) that not every other player has cast yet |
+| `map_vote`, `event_vote`, `treasure_bid` | the agent has voted |
+| `teammate_maybe` | rewards, shop, rest site, private event, popups: the mod can't tell, so the run never ends there for idling (the model still acts) |
+| `no_state` | the mod is unreachable |
 
 ## Rewards (after combat)
 
