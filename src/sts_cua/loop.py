@@ -39,8 +39,13 @@ def run(
     log: RunLog,
     config: LoopConfig | None = None,
     state_fn: Callable[[], dict | None] | None = None,
+    notes_fn: Callable[[dict | None], tuple[str, list[str]]] | None = None,
 ) -> dict:
-    """state_fn, if given, returns the true game state each step. It is logged, never shown to the model."""
+    """state_fn, if given, returns the true game state each step. It is logged, never shown to the model.
+
+    notes_fn, if given, maps that state to (notes text, note ids): lessons from earlier runs
+    shown to the model this step (sts_cua.memory.Retriever). The ids are logged as notes_shown.
+    """
     config = config or LoopConfig()
     history: list[HistoryEntry] = []
     idle = errors = unchanged = 0
@@ -61,10 +66,11 @@ def run(
                 unchanged = 0
         previous = screenshot
         state = state_fn() if state_fn else None
+        notes, notes_shown = notes_fn(state) if notes_fn else ("", None)
         try:
-            decision = model.decide(Observation(step, screenshot, history))
+            decision = model.decide(Observation(step, screenshot, history, notes=notes))
         except Exception as exc:  # API or adapter failure: log it and keep going, up to max_errors
-            log.step(step, screenshot, None, [], error=f"model: {exc!r}", state=state)
+            log.step(step, screenshot, None, [], error=f"model: {exc!r}", state=state, notes_shown=notes_shown)
             errors += 1
             if errors >= config.max_errors:
                 end_reason = "model_errors"
@@ -80,7 +86,7 @@ def run(
                 break
             executed.append(action)
 
-        log.step(step, screenshot, decision, executed, error, state=state)
+        log.step(step, screenshot, decision, executed, error, state=state, notes_shown=notes_shown)
         history.append(HistoryEntry(step, decision.thought, executed))
 
         if decision.done:

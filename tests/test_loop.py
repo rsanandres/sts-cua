@@ -143,3 +143,27 @@ def test_changing_screen_is_not_stuck(tmp_path, frame):
     log = RunLog(tmp_path, meta={})
     summary = run(Clicker(), FakeScreen(frames), log, LoopConfig(max_steps=6, settle_seconds=0, max_unchanged=2))
     assert summary["end_reason"] == "max_steps"
+
+
+def test_notes_reach_model_and_are_logged(tmp_path, frame):
+    seen, states = [], iter([{"state_type": "map"}, {"state_type": "monster"}])
+
+    class Reader:
+        name = "reader"
+
+        def decide(self, obs):
+            seen.append(obs.notes)
+            return Decision(thought="", actions=[Click(0, 0)])
+
+    def notes_fn(state):
+        return ("- on the map, click a node", ["n0001"]) if state["state_type"] == "map" else ("", [])
+
+    log = RunLog(tmp_path, meta={})
+    run(Reader(), FakeScreen([frame]), log, LoopConfig(max_steps=2, settle_seconds=0),
+        state_fn=lambda: next(states), notes_fn=notes_fn)
+    assert seen == ["- on the map, click a node", ""]
+    assert [s["notes_shown"] for s in read_steps(log)] == [["n0001"], []]
+
+    log = RunLog(tmp_path, meta={})
+    run(Reader(), FakeScreen([frame]), log, LoopConfig(max_steps=1, settle_seconds=0))
+    assert "notes_shown" not in read_steps(log)[0] and seen[-1] == ""
