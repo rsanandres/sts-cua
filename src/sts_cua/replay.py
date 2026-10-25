@@ -32,6 +32,8 @@ BAR_HEIGHT = 150
 UNCHANGED = 1.0  # same threshold as LoopConfig.unchanged_threshold
 STUCK_MIN = 3  # unchanged steps in a row worth a highlight
 BIG_HIT = 10  # HP lost between two steps worth a highlight
+# Choosing cards in the middle of a fight (e.g. the Silent's Survivor discard) leaves the combat state_type.
+MID_FIGHT = ("hand_select", "card_select")
 FONT_PATHS = (
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
@@ -119,7 +121,7 @@ def highlights(steps: list[dict], diffs: list[float | None], summary: dict) -> l
             if fighting and not in_fight:
                 in_fight, fight_start_hp, foe = True, _hp(state), _enemies(state)
                 out.append(Highlight(record["step"], "fight", f"Fight starts: {foe} ({stype})"))
-            elif in_fight and not fighting:
+            elif in_fight and not fighting and stype not in MID_FIGHT:
                 in_fight = False
                 hp, start = _hp(state), fight_start_hp
                 if stype == "game_over" or not hp:  # died, or left the run (menu states have no HP)
