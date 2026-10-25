@@ -145,6 +145,55 @@
         <ul id="live-notes" class="notes"></ul>
       </div>
     </div>
+
+    <form id="coop-form" class="card coop" autocomplete="off">
+      <h2>Co-op</h2>
+      <p class="muted small">Plays one run with you as a teammate (not the supervisor). Host on Windows, invite the agent's
+        Steam account, accept the invite in the WSL Steam window, and start here once the agent's game shows your lobby.
+        Vote on the map first: the agent votes last and follows the majority.</p>
+      <div class="row">
+        <label>Model
+          <select id="coop-model">
+            <option value="claude-haiku-5-5" selected>claude-haiku-5-5 (fastest)</option>
+            <option value="claude-sonnet-5-5">claude-sonnet-5-5</option>
+            <option value="qwen3-vl-8b">qwen3-vl-8b (local vLLM)</option>
+            <option value="scripted">scripted</option>
+          </select>
+        </label>
+        <label>Thinking
+          <select id="coop-thinking">
+            <option value="off" selected>off (fastest)</option>
+            <option value="on">on</option>
+          </select>
+        </label>
+      </div>
+      <div class="row">
+        <label>Effort
+          <select id="coop-effort">
+            <option value="low" selected>low</option>
+            <option value="medium">medium</option>
+            <option value="high">high</option>
+          </select>
+        </label>
+        <label>Max cost ($)
+          <input id="coop-cost" type="number" min="0" max="5" step="0.05" value="1.00" inputmode="decimal">
+        </label>
+      </div>
+      <div class="row">
+        <label>Stop after idle (min)
+          <input id="coop-idle" type="number" min="5" max="120" step="5" value="30" inputmode="numeric">
+        </label>
+        <label>Game build (optional)
+          <input id="coop-build" type="text" placeholder="e.g. v0.107.1">
+        </label>
+      </div>
+      <label class="check"><input id="coop-rules" type="checkbox" checked> General rules first (wait, vote last, end turn without a model call)</label>
+      <p id="coop-status" class="muted small"></p>
+      <div class="buttons">
+        <button type="submit" id="coop-start" class="primary">Start co-op</button>
+        <button type="button" id="coop-stop">Stop co-op</button>
+      </div>
+    </form>
   </section>
 
   <!-- Results -->
@@ -270,6 +319,7 @@
     <h2>Logs</h2>
     <select id="log-name" aria-label="Log">
       <option value="supervisor">supervisor</option>
+      <option value="coop">coop</option>
       <option value="vllm">vllm</option>
       <option value="game">game</option>
       <option value="steam">steam</option>

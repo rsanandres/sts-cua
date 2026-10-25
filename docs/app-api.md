@@ -26,7 +26,8 @@ All JSON. Errors: `{"error": "message"}` with 4xx/5xx: 400 invalid input, 401 no
   "busy": str|null             // an action in progress, see below
 }
 ```
-`busy`: "wsl_shutdown", "stack_down", "stack_up" (until stack_up.sh logs "stack is up"), "supervisor_stop" / "vllm_stop" (between SIGINT and exit), "vllm_start" (until vLLM logs "Application startup complete"), "reflect", or null. `budget.cap_usd` is the `daily_budget` of the last `/api/runs/start`, else 2.0; `spent_usd` is `supervisor.spent_today` (run summaries plus reflect calls). A process counts as running when the app started it (pid file) or pgrep finds it.
+`coop` (top level): the co-op session, `{"running", "pid", "since"}` like a process (the app's own or one pgrep finds with `python -m sts_cua ... --coop`).
+`busy`: "wsl_shutdown", "stack_down", "stack_up" (until stack_up.sh logs "stack is up"), "supervisor_stop" / "vllm_stop" / "coop_stop" (between SIGINT and exit), "vllm_start" (until vLLM logs "Application startup complete"), "reflect", or null. `budget.cap_usd` is the `daily_budget` of the last `/api/runs/start`, else 2.0; `spent_usd` is `supervisor.spent_today` (run summaries plus reflect calls). A process counts as running when the app started it (pid file) or pgrep finds it.
 
 ## Stack control (fixed actions only, never arbitrary commands)
 
@@ -35,7 +36,7 @@ All JSON. Errors: `{"error": "message"}` with 4xx/5xx: 400 invalid input, 401 no
 - `POST /api/wsl/shutdown` -> body `{"confirm": true}`; runs `cmd.exe /c wsl --shutdown` after replying (frees all WSL RAM/GPU for gaming; this also kills the app). `{"shutting_down": true}`; 400 unless `confirm` is exactly `true`. It runs about 1.5 s after the reply and does not stop the stack first: call `/api/stack/down` before it for a clean Steam shutdown.
 - `POST /api/vllm/start` -> body `{"model": "qwen3-vl-8b"}`; starts vLLM with the docs/hosting.md command (`--gpu-memory-utilization 0.55 --max-model-len 8192 --max-num-seqs 1 --limit-mm-per-prompt '{"image":1,"video":0}'`), log to `~/.sts-cua/logs/vllm.log`. Model from `factory.LOCAL_MODELS` only. `{"started": true, "pid": int}`; 409 if a model server is running.
 - `POST /api/vllm/stop` -> SIGINT, then SIGTERM after 10 s, to the app's vLLM or any matching `vllm serve|vllm.entrypoints|llama-server`. `{"stopped": true, "pids": [int]}` (empty if none was running)
-- `GET /api/logs/<name>?lines=200` where name in steam|game|vllm|supervisor|app|stack|reflect -> `{"name": str, "lines": [str]}` (lines clamped to 1..2000; a missing file gives `[]`). steam is `/tmp/steam.log`, game `/tmp/sts2.log`, the rest `~/.sts-cua/logs/<name>.log`.
+- `GET /api/logs/<name>?lines=200` where name in steam|game|vllm|supervisor|app|stack|reflect|coop -> `{"name": str, "lines": [str]}` (lines clamped to 1..2000; a missing file gives `[]`). steam is `/tmp/steam.log`, game `/tmp/sts2.log`, the rest `~/.sts-cua/logs/<name>.log`.
 
 ## Agent runs
 
@@ -47,6 +48,14 @@ All JSON. Errors: `{"error": "message"}` with 4xx/5xx: 400 invalid input, 401 no
   ```
   Starts `python -m sts_cua.supervisor ...` as a child process (log to `~/.sts-cua/logs/supervisor.log`, cwd the repo). Only `model` is required; defaults: thinking off, effort low, daily_budget 2.0, max_runs null, memory false, game_build null. `daily_budget` is clamped to 0..5.0 and `max_runs` to 1..1000 (an integer); `game_build` must match `^[\w.-]+$`; anything else invalid is a 400. `--thinking`/`--effort` are passed for Claude models only. `memory: true` passes `--memory memory/notes.jsonl`. 409 if a supervisor is already running (the app's own or one pgrep finds). `{"started": true, "pid": int}`
 - `POST /api/runs/stop` -> SIGINT then SIGTERM after 10 s (in the background; the reply comes right away). `{"stopped": true, "pids": [int]}`
+- `POST /api/coop/start` -> body
+  ```
+  {"model": "claude-haiku-5-5" | "claude-sonnet-5-5" | "qwen3-vl-8b" | "scripted",
+   "thinking": "off"|"on", "effort": "low"|"medium"|"high",
+   "max_cost": 1.0, "idle_minutes": 30, "rules": true, "game_build": str|null}
+  ```
+  Starts one co-op agent session, `python -m sts_cua --coop ...` (never the supervisor), log `~/.sts-cua/logs/coop.log`, cwd the repo. Every field is optional; the defaults are the fastest settings: Haiku 5.5, thinking off, effort low, max_cost 1.0 (clamped to 0..5.0), idle_minutes 30 (clamped to 5..120, `--coop-idle-minutes`), rules true (`false` passes `--no-rules`), game_build as in runs/start. 409 if a co-op session or a supervisor is running (both drive the agent's display); `/api/runs/start` likewise answers 409 while a co-op session runs. `{"started": true, "pid": int, "settings": {...}}`
+- `POST /api/coop/stop` -> SIGINT then SIGTERM after 10 s. `{"stopped": true, "pids": [int]}`
 - `GET /api/live` -> the newest run dir under runs/:
   ```
   {"run_id": str|null, "kind": "game"|"reset"|null, "model": str|null, "running": bool,
@@ -61,7 +70,7 @@ All JSON. Errors: `{"error": "message"}` with 4xx/5xx: 400 invalid input, 401 no
 ## Results
 
 - `GET /api/ledger?limit=100` -> `{"entries": [ledger.jsonl lines, newest first]}` (limit 1..1000)
-- `GET /api/runs?limit=50` -> `{"runs": [{"run_id", "kind", "model", "started_at", "end_reason", "steps", "cost_usd", "outcome", "floor", "score", "seed", "outcome_source"}]}` (newest first, limit 1..500; from meta/summary/score.json, `floor` is score.json's `max_floor`; missing files -> nulls)
+- `GET /api/runs?limit=50` -> `{"runs": [{"run_id", "kind", "model", "started_at", "end_reason", "steps", "cost_usd", "outcome", "floor", "score", "seed", "outcome_source"}]}` (newest first, limit 1..500; from meta/summary/score.json, `floor` is score.json's `max_floor`; missing files -> nulls). A co-op run's row also has `"mode": "coop"`; solo rows have no `mode`. `/api/live` adds the same field for a co-op run.
   `seed` and `outcome_source` ("compendium" when the outcome came from the game's run history, "states" when inferred from the logged states) are score.json's; runs scored before they existed have nulls.
 - `GET /api/runs/<run_id>` -> `{"meta": {...}, "summary": {...}|null, "score": {...}|null}`
 - `GET /api/runs/<run_id>/steps?offset=0&limit=50` -> `{"total": int, "steps": [steps.jsonl records without "raw"]}` (limit 1..500)

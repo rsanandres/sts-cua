@@ -26,8 +26,10 @@ from pathlib import Path
 from typing import Callable
 from zoneinfo import ZoneInfo
 
+from .. import coop
 from ..models.factory import LOCAL_MODELS
 from ..state import DEFAULT_URL, fetch_state, summarize
+from ..score import run_mode
 from ..supervisor import BUDGET_TZ, spent_today
 from . import files
 from .procs import RUN_PATTERN, ProcessManager
@@ -37,6 +39,9 @@ RUN_MODELS = (*CLAUDE_MODELS, *LOCAL_MODELS, "scripted")
 MAX_DAILY_BUDGET = 5.0
 DEFAULT_DAILY_BUDGET = 2.0
 MAX_RUNS = 1000
+MAX_COOP_COST = 5.0
+DEFAULT_COOP_COST = 1.0
+COOP_IDLE_MINUTES = (5.0, 120.0)
 MEMORY_STORE = "memory/notes.jsonl"
 NOTE_STATUSES = ("all", "probation", "active", "retired")
 # The docs/hosting.md vLLM command, minus the model.
@@ -167,6 +172,41 @@ def supervisor_argv(body: dict, python: str, display: str) -> tuple[list[str], d
     return argv, settings
 
 
+def coop_argv(body: dict, python: str, display: str) -> tuple[list[str], dict]:
+    """The `python -m sts_cua --coop` argv for a /api/coop/start body, and the validated settings.
+
+    Defaults are the fastest settings (coop.py): Haiku 5.5, thinking off, rules on.
+    """
+    model = _choice(body, "model", RUN_MODELS, "claude-haiku-5-5")
+    thinking = _choice(body, "thinking", ("off", "on"), "off")
+    effort = _choice(body, "effort", ("low", "medium", "high"), "low")
+    max_cost = _number(body, "max_cost", DEFAULT_COOP_COST, 0.0, MAX_COOP_COST)
+    idle = _number(body, "idle_minutes", coop.IDLE_MINUTES, *COOP_IDLE_MINUTES)
+    rules = body.get("rules", True)
+    if not isinstance(rules, bool):
+        raise ApiError(400, "rules must be true or false")
+    build = body.get("game_build")
+    if build is not None:
+        build = _name(build, "game_build")
+
+    argv = [python, "-m", "sts_cua", "--coop", "--display", display, "--model", model,
+            "--max-cost", f"{max_cost:g}", "--coop-idle-minutes", f"{idle:g}"]
+    if model in CLAUDE_MODELS:
+        argv += ["--thinking", thinking, "--effort", effort]
+    if build is not None:
+        argv += ["--game-build", build]
+    if not rules:
+        argv += ["--no-rules"]
+    settings = {"model": model, "thinking": thinking, "effort": effort, "max_cost": max_cost,
+                "idle_minutes": idle, "rules": rules, "game_build": build}
+    return argv, settings
+
+
+def _coop_mark(meta: dict) -> dict:
+    """{"mode": "coop"} for a co-op run (score.run_mode), nothing for solo runs."""
+    return {"mode": "coop"} if run_mode(meta) == "coop" else {}
+
+
 # ---- system readings
 
 def gpu_memory(commands=NVIDIA_SMI) -> dict | None:
@@ -244,7 +284,7 @@ class App:
             return "stack_down"
         if p.managed("stack_up") and STACK_READY not in p.log_since_start("stack_up"):
             return "stack_up"
-        for name in ("supervisor", "vllm"):
+        for name in ("supervisor", "vllm", "coop"):
             if name in p.stopping:
                 return f"{name}_stop"
         if p.managed("vllm") and VLLM_READY not in p.log_since_start("vllm", limit=4 << 20):
@@ -263,7 +303,9 @@ class App:
         }
 
     def _mod(self) -> dict:
-        state = summarize(fetch_state(self.config.state_url, timeout=1.0))
+        # The singleplayer endpoint answers 409 during a co-op run; coop.fetch_state falls back.
+        state = summarize(fetch_state(self.config.state_url, timeout=1.0)
+                          or fetch_state(coop.multiplayer_url(self.config.state_url), timeout=1.0))
         if state is None:
             return {"reachable": False, "state_type": None, "act": None, "floor": None, "hp": None, "max_hp": None}
         player = state.get("player") or {}
@@ -278,6 +320,7 @@ class App:
             "budget": self._budget(),
             "mod": self._mod(),
             "busy": self.busy(),
+            "coop": self.procs.info("coop"),
         }
 
     # stack control
@@ -336,7 +379,7 @@ class App:
             "steam": Path("/tmp/steam.log"),  # tools/stack_up.sh
             "game": Path("/tmp/sts2.log"),  # game.GameConfig.log_path
         }
-        if name not in ("steam", "game", "vllm", "supervisor", "app", "stack", "reflect"):
+        if name not in ("steam", "game", "vllm", "supervisor", "app", "stack", "reflect", "coop"):
             raise ApiError(404, f"no log {name}")
         path = paths.get(name) or self.procs.log_path(name)
         lines = _query_int(query, "lines", 200, 1, 2000)
@@ -349,6 +392,8 @@ class App:
         with self._lock:
             if self.procs.info("supervisor")["running"]:
                 raise ApiError(409, "a supervisor is already running")
+            if self.procs.info("coop")["running"]:
+                raise ApiError(409, "a co-op session is running on the agent's display")
             pid = self.procs.start("supervisor", argv, cwd=self.config.repo, env={"PYTHONUNBUFFERED": "1"},
                                    extra={"settings": settings})
             self._settings_path().write_text(json.dumps(settings) + "\n", encoding="utf-8")
@@ -356,6 +401,21 @@ class App:
 
     def runs_stop(self, **_) -> dict:
         return {"stopped": True, "pids": self.procs.stop("supervisor")}
+
+    def coop_start(self, body: dict, **_) -> dict:
+        """One co-op agent session (never the supervisor): python -m sts_cua --coop, log `coop`."""
+        argv, settings = coop_argv(body, self.python, self.config.display)
+        with self._lock:
+            if self.procs.info("coop")["running"]:
+                raise ApiError(409, "a co-op session is already running")
+            if self.procs.info("supervisor")["running"]:
+                raise ApiError(409, "a supervisor is running on the agent's display; stop it first")
+            pid = self.procs.start("coop", argv, cwd=self.config.repo, env={"PYTHONUNBUFFERED": "1"},
+                                   extra={"settings": settings})
+        return {"started": True, "pid": pid, "settings": settings}
+
+    def coop_stop(self, **_) -> dict:
+        return {"stopped": True, "pids": self.procs.stop("coop")}
 
     def live(self, **_) -> dict:
         dirs = files.run_dirs(self.config.runs)
@@ -378,6 +438,7 @@ class App:
                 screenshot = f"/api/runs/{run.name}/screenshots/{shot}"
         return {
             "run_id": run.name, "kind": meta.get("kind"), "model": meta.get("model"),
+            **_coop_mark(meta),
             "running": summary is None and bool(self.procs.matching(RUN_PATTERN)),
             "step": step, "cost_usd": round(cost, 6),
             "last": None if last is None else {
@@ -420,7 +481,7 @@ class App:
                 "started_at": meta.get("started_at"), "end_reason": summary.get("end_reason"),
                 "steps": summary.get("steps"), "cost_usd": summary.get("cost_usd"), "outcome": score.get("outcome"),
                 "floor": score.get("max_floor"), "score": score.get("score"), "seed": score.get("seed"),
-                "outcome_source": score.get("outcome_source"),
+                "outcome_source": score.get("outcome_source"), **_coop_mark(meta),
             })
         return {"runs": out}
 
@@ -543,6 +604,8 @@ ROUTES = [
     ("GET", r"/api/logs/" + _SEG.format("name"), "logs"),
     ("POST", r"/api/runs/start", "runs_start"),
     ("POST", r"/api/runs/stop", "runs_stop"),
+    ("POST", r"/api/coop/start", "coop_start"),
+    ("POST", r"/api/coop/stop", "coop_stop"),
     ("GET", r"/api/live", "live"),
     ("GET", r"/api/screen\.png", "screen"),
     ("GET", r"/api/ledger", "ledger"),

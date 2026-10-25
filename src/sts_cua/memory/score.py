@@ -17,7 +17,7 @@ can't produce a tight interval.
 Gate: once a note has MIN_SHOWN shown and MIN_HIDDEN hidden units, a probation note
 becomes active when lo > 0, and any note is retired when hi < 0.
 Only notes created before the run started are scored, a run is scored once
-(memory_score.json in the run directory marks it), and reset runs are skipped.
+(memory_score.json in the run directory marks it), and reset and co-op runs are skipped.
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ import json
 import math
 from datetime import datetime
 
+from ..score import run_mode
 from .retrieve import context_from_state, matches
 from .runs import Run, fights, wasted_steps
 from .store import Group, Note, NoteStore, Utility, now
@@ -103,6 +104,8 @@ def score_run(store: NoteStore, run: Run, force: bool = False) -> dict:
         return {"skipped": "already scored", **json.loads(marker.read_text(encoding="utf-8"))}
     if run.meta.get("kind") == "reset":
         return {"skipped": "reset run"}
+    if run_mode(run.meta) == "coop":
+        return {"skipped": "co-op run"}
     if not run.used_memory:
         return {"skipped": "run did not use memory"}
 

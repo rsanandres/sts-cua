@@ -241,3 +241,18 @@ def load_states(run_dir: str | Path) -> list[dict | None]:
         return []
     records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     return [r.get("state") for r in sorted(records, key=lambda r: r["step"])]
+
+
+def run_mode(meta: dict | None) -> str:
+    """"coop" for a co-op run (python -m sts_cua --coop, meta mode "coop"), else "solo".
+
+    Co-op runs are not solo data: a teammate shares the fights and the path, so their scores
+    don't compare with solo runs. The supervisor plays solo only, and memory scoring and
+    reflection skip co-op runs.
+    """
+    return "coop" if (meta or {}).get("mode") == "coop" else "solo"
+
+
+def load_meta(run_dir: str | Path) -> dict:
+    path = Path(run_dir) / "meta.json"
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}

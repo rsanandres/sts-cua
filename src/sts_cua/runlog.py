@@ -38,6 +38,7 @@ class RunLog:
         error: str | None = None,
         state: dict | None = None,
         notes_shown: list[str] | None = None,
+        waiting: str | None = None,
         screen_diff: float | None = None,
     ) -> None:
         shot_name = f"screenshots/step_{step:04d}.png"
@@ -52,6 +53,7 @@ class RunLog:
                 reasoning=decision.reasoning,
                 stop_reason=decision.stop_reason,
                 done=decision.done,
+                source=decision.source,
                 proposed=[action_to_dict(a) for a in decision.actions],
                 usage={
                     "input_tokens": u.input_tokens,
@@ -61,6 +63,8 @@ class RunLog:
                     "cost_usd": u.cost_usd,
                 },
             )
+            if decision.rule:
+                record["rule"] = decision.rule
             if self._keep_raw and decision.raw is not None:
                 record["raw"] = decision.raw
             self.cost_usd += u.cost_usd
@@ -73,6 +77,8 @@ class RunLog:
             record["state"] = state
         if notes_shown is not None:
             record["notes_shown"] = notes_shown
+        if waiting:
+            record["waiting"] = waiting  # co-op: why waiting was expected (sts_cua.coop.waiting)
         if error:
             record["error"] = error
         self._steps.write(json.dumps(record) + "\n")

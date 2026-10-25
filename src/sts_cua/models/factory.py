@@ -7,7 +7,8 @@
 
 --model is 'scripted' (no model; waits every step), a local model name from LOCAL_MODELS
 (served by vLLM, see docs/hosting.md), or anything else, which is taken as a Claude model ID.
-build_model reads args.max_steps for the scripted model when the parser defines it.
+build_model reads args.max_steps for the scripted model when the parser defines it, and
+args.coop (python -m sts_cua --coop) to add the co-op prompt; parsers without it get solo.
 """
 
 from __future__ import annotations
@@ -63,6 +64,7 @@ def build_model(args: argparse.Namespace) -> Model:
             history_steps=args.history_steps,
             goal=args.goal,
             seed=args.seed,
+            coop=bool(getattr(args, "coop", False)),
         )
         if args.temperature is not None:
             config.temperature = args.temperature
@@ -77,6 +79,7 @@ def build_model(args: argparse.Namespace) -> Model:
     config = ClaudeConfig(
         model=args.model, thinking=args.thinking, effort=args.effort, history_steps=args.history_steps,
         send_width=args.send_width, goal=args.goal, max_tokens=args.max_tokens,
+        coop=bool(getattr(args, "coop", False)),
     )
     if prompt:
         config.system_prompt = prompt

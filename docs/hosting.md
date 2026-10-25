@@ -36,6 +36,7 @@ Windows                                    WSL2 (Ubuntu 24.04)
 3. Keep both copies on the same build and Steam branch. Check the version on both main menus before a session.
 4. Start the AI's copy first with `tools/launch_sts2.sh`, so it launches directly on Xvfb with the GPU.
 5. Raph hosts on Windows and invites the agent account. Accept the invite in the WSL Steam window.
+6. Once the agent's game shows Raph's lobby, start the agent with `python -m sts_cua --coop` (or the app's Co-op section). The README's "Co-op" section has the whole flow.
 
 ### To verify
 
@@ -128,9 +129,9 @@ Spillover:
 
 ## Harness changes co-op needs
 
-- `loop.py` stops after 3 steps in a row that only wait. In co-op, waiting for Raph to end his turn is normal, so co-op needs its own idle rule.
-- A Qwen3-VL adapter behind `Model.decide`, talking to vLLM's OpenAI-compatible endpoint and converting 0-1000 coordinates to screen pixels.
-- `docs/action-space.md` lists Multiplayer as off limits. Add the co-op screens: lobby, the map vote, and waiting on the other player.
+- Done: co-op mode (`python -m sts_cua --coop`, `src/sts_cua/coop.py`, `src/sts_cua/rules.py`) with its own idle rule: waits don't count while the mod says it's Raph's move or a vote is open, and a 30-minute no-progress timeout instead.
+- Done: the Qwen3-VL adapter (`src/sts_cua/models/qwen.py`).
+- Done: the co-op screens in `docs/action-space.md` ("Co-op"), mostly unverified.
 - For the `--fastmp` fallback only:
   - `game.launch` refuses a second copy, since it checks with `pgrep`.
   - Every copy logs to the same file.

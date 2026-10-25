@@ -387,6 +387,75 @@
     if (data) setTimeout(startPolling, 1000);
   });
 
+  // Co-op: one agent session playing with Raph (python -m sts_cua --coop), not the supervisor.
+
+  const COOP_KEY = "sts-cua.coop-form";
+  const coopFields = ["coop-model", "coop-thinking", "coop-effort", "coop-cost", "coop-idle", "coop-build", "coop-rules"];
+
+  function saveCoop() {
+    try {
+      const values = {};
+      for (const id of coopFields) values[id] = $(id).type === "checkbox" ? $(id).checked : $(id).value;
+      localStorage.setItem(COOP_KEY, JSON.stringify(values));
+    } catch (e) { /* storage unavailable */ }
+  }
+
+  function restoreCoop() {
+    try {
+      const values = JSON.parse(localStorage.getItem(COOP_KEY) || "{}");
+      for (const id of coopFields) {
+        if (!(id in values)) continue;
+        if ($(id).type === "checkbox") $(id).checked = !!values[id];
+        else $(id).value = values[id];
+      }
+    } catch (e) { /* storage unavailable */ }
+  }
+
+  function updateCoopHint() {
+    const claude = $("coop-model").value.startsWith("claude-");
+    $("coop-thinking").disabled = !claude;
+    $("coop-effort").disabled = !claude;
+  }
+
+  $("coop-model").addEventListener("change", updateCoopHint);
+
+  $("coop-form").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    let cost = parseFloat($("coop-cost").value);
+    if (!Number.isFinite(cost) || cost < 0) cost = 1.0;
+    cost = Math.min(cost, 5.0);
+    $("coop-cost").value = cost.toFixed(2);
+    let idle = parseFloat($("coop-idle").value);
+    if (!Number.isFinite(idle)) idle = 30;
+    idle = Math.min(Math.max(idle, 5), 120);
+    $("coop-idle").value = String(idle);
+    const body = {
+      model: $("coop-model").value,
+      thinking: $("coop-thinking").value,
+      effort: $("coop-effort").value,
+      max_cost: cost,
+      idle_minutes: idle,
+      rules: $("coop-rules").checked,
+      game_build: $("coop-build").value.trim() || null,
+    };
+    saveCoop();
+    const data = await post($("coop-start"), "/api/coop/start", body);
+    if (data) {
+      toast(`Co-op agent started${data.pid ? " (pid " + data.pid + ")" : ""}`);
+      setText("coop-status", "Co-op session running.");
+      liveRunning = true;
+      startPolling();
+    }
+  });
+
+  $("coop-stop").addEventListener("click", async (ev) => {
+    const data = await post(ev.currentTarget, "/api/coop/stop", {}, "Stopping the co-op agent");
+    if (data) {
+      setText("coop-status", data.pids && data.pids.length ? "Stopping." : "No co-op session was running.");
+      setTimeout(startPolling, 1000);
+    }
+  });
+
   $("live-fresh").addEventListener("change", () => {
     liveShotUrl = null;
     refreshLive().catch(() => {});
@@ -421,7 +490,7 @@
     if (!live.run_id) {
       setText("live-meta", "No runs yet.");
     } else {
-      setText("live-meta", [`Run ${live.run_id}`, live.kind, live.model].filter(Boolean).join(" · "));
+      setText("live-meta", [`Run ${live.run_id}`, live.mode === "coop" ? "co-op" : live.kind, live.model].filter(Boolean).join(" · "));
     }
     setText("live-step", live.run_id ? dash(live.step) : "-");
     setText("live-cost", live.run_id ? money(live.cost_usd) : "-");
@@ -580,7 +649,7 @@
         onclick: open, onkeydown: (e) => { if (e.key === "Enter") open(); },
       },
         td("Time", localTime(r.started_at)),
-        td("Kind", dash(r.kind)),
+        td("Kind", r.mode === "coop" ? "co-op" : dash(r.kind)),
         td("Model", dash(r.model)),
         td("Outcome", outcomeBadge(r.outcome)),
         td("Floor", dash(r.floor), "n"),
@@ -956,5 +1025,7 @@
 
   restoreForm();
   updateRunHint();
+  restoreCoop();
+  updateCoopHint();
   route();
 })();
