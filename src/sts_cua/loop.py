@@ -39,8 +39,13 @@ def run(
     log: RunLog,
     config: LoopConfig | None = None,
     state_fn: Callable[[], dict | None] | None = None,
+    stop_fn: Callable[[dict | None], str | None] | None = None,
 ) -> dict:
-    """state_fn, if given, returns the true game state each step. It is logged, never shown to the model."""
+    """state_fn, if given, returns the true game state each step. It is logged, never shown to the model.
+
+    stop_fn, if given, is called with each step's state before the model is asked; a string
+    return logs the step with no decision and ends the run with that string as end_reason.
+    """
     config = config or LoopConfig()
     history: list[HistoryEntry] = []
     idle = errors = unchanged = 0
@@ -61,6 +66,11 @@ def run(
                 unchanged = 0
         previous = screenshot
         state = state_fn() if state_fn else None
+        reason = stop_fn(state) if stop_fn else None
+        if reason:
+            log.step(step, screenshot, None, [], state=state)
+            end_reason = reason
+            break
         try:
             decision = model.decide(Observation(step, screenshot, history))
         except Exception as exc:  # API or adapter failure: log it and keep going, up to max_errors

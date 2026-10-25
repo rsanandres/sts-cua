@@ -143,3 +143,23 @@ def test_changing_screen_is_not_stuck(tmp_path, frame):
     log = RunLog(tmp_path, meta={})
     summary = run(Clicker(), FakeScreen(frames), log, LoopConfig(max_steps=6, settle_seconds=0, max_unchanged=2))
     assert summary["end_reason"] == "max_steps"
+
+
+def test_stop_fn_ends_the_loop_after_logging(tmp_path, frame):
+    states = iter([{"floor": 1}, {"floor": 2}, {"state_type": "game_over"}, {"floor": 9}])
+    seen = []
+
+    def stop_fn(state):
+        seen.append(state)
+        return "run_over:died" if state.get("state_type") == "game_over" else None
+
+    model = ScriptedModel([[Click(1, 1)]] * 10)
+    screen = FakeScreen([frame])
+    log = RunLog(tmp_path, meta={})
+    summary = run(model, screen, log, LoopConfig(max_steps=10, settle_seconds=0),
+                  state_fn=lambda: next(states), stop_fn=stop_fn)
+    assert summary["end_reason"] == "run_over:died" and summary["steps"] == 3
+    assert len(screen.performed) == 2  # the model isn't asked on the stopping step
+    steps = read_steps(log)
+    assert steps[-1]["state"] == {"state_type": "game_over"} and "thought" not in steps[-1]
+    assert len(seen) == 3
