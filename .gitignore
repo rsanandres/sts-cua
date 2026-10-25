@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+runs/
+game-config-backup/
+*.png
+!docs/**/*.png
+target.json

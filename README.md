@@ -40,7 +40,7 @@ A computer-use agent (CUA) that plays Slay the Spire from screen pixels, running
 
 Decided 2026-10-25: build on Spire 2 (Raph owns both). Spire 2 is in Early Access (since 2026-03-05), native Linux, built in Godot.
 
-- No CommunicationMod equivalent exists, so we write our own state-export mod. Spire 2 mods are C# DLLs plus Godot `.pck` files, patching the game with Harmony hooks ([modding tutorial](https://github.com/fresh-milkshake/Modding-Tutorial), pinned to build v0.103.3, may be out of date).
+- No state-export mod exists for Spire 2, so we write our own. Spire 2 mods are C# DLLs plus Godot `.pck` files, patching the game with Harmony hooks ([modding tutorial](https://github.com/fresh-milkshake/Modding-Tutorial), pinned to build v0.103.3, may be out of date).
 - Mega Crit made its built-in mod loader official with Steam Workshop support in Major Update 2 (v0.107.1, 2026-06-19) and calls it barebones ([guide](https://bossdown.com/guides/slay-the-spire-2-steam-workshop-mods/)).
 - A community MCP server maps 144 hooks and 175 overridable methods across combat, cards, damage, powers, turns and rewards. Useful for finding where to read state ([Nexus](https://www.nexusmods.com/slaythespire2/mods/345)). Third-party, unverified.
 - Early Access patches can break the mod and shift the UI, so pin a game build per experiment and record it in each run log.
@@ -74,10 +74,9 @@ How much does reasoning buy you in Spire, and on which decisions? Run the agents
 
 ## Prior work
 
-- [CommunicationMod](https://github.com/ForgottenArbiter/CommunicationMod): lets another process read state and control the game over stdin/stdout. It kills the controller if it does not print "ready" in time, and any stray print to stdout breaks the protocol. Config lives at `~/.config/ModTheSpire/CommunicationMod/config.properties`, so each parallel instance likely needs its own config dir (inference, untested).
-- [spirecomm](https://github.com/ForgottenArbiter/spirecomm): Python client for CommunicationMod, plus a simple scripted AI. A useful baseline to beat.
-- sts_lightspeed (gamerpuppy): RNG-accurate C++ simulator, used by RL projects such as [sts-rl-agent](https://huggingface.co/Jialeiv/sts-rl-agent) (self-reports 14% win rate on 50 seeds vs 6% for the stock heuristics) and [AutoClad](https://github.com/benmuth/AutoClad). Not pixels, but useful later if we ever train a policy.
-- The Spire 1 tools above (CommunicationMod, spirecomm, sts_lightspeed) don't work on Spire 2, but their protocol and bots are good references for our own mod.
+- [Spire 2 modding tutorial](https://github.com/fresh-milkshake/Modding-Tutorial): mod loading, Harmony hooks, Godot `.pck` assets. Pinned to build v0.103.3, may be out of date.
+- [STS2 Modding Assistant MCP](https://www.nexusmods.com/slaythespire2/mods/345): community tool that maps 144 hooks and 175 overridable methods; a guide to where game state lives. Third-party, unverified.
+- No published computer-use or RL agent for Spire 2 found yet.
 
 ## To verify
 
@@ -94,6 +93,67 @@ How much does reasoning buy you in Spire, and on which decisions? Run the agents
 4. Local open model on the 4090 behind the same interface.
 5. Thinking-on vs thinking-off comparison on fixed seeds.
 
+## Run the harness
+
+Needs Python 3.11+, an X display (Xvfb in the game container), and `xdotool`.
+
+```
+uv venv && uv pip install -e ".[dev]"
+Xvfb :99 -screen 0 1280x720x24 &
+python -m sts_cua --display :99 --model scripted --max-steps 3      # dry run, no API calls
+python -m sts_cua --display :99 --model claude-haiku-5-5 --thinking off --max-steps 20 --max-cost 0.25
+python -m sts_cua --display :99 --model claude-sonnet-5-5 --thinking on --effort medium --max-steps 20
+pytest
+```
+
+First live test, before Spire: a green button that jumps after every hit, scored in `target.json`.
+
+```
+DISPLAY=:99 .venv/bin/python tools/click_target.py --out target.json &
+.venv/bin/python -m sts_cua --display :99 --model claude-haiku-5-5 --thinking off --prompt-file prompts/click_target.txt --max-steps 5 --max-cost 0.05
+cat target.json
+```
+
+Claude needs `ANTHROPIC_API_KEY` (or an `ant auth login` profile). Each run writes `runs/<timestamp>/` with `meta.json`, `steps.jsonl` (thought, reasoning summary, proposed and executed actions, tokens, cost per step), a screenshot per step, and `summary.json`. A run stops at `--max-steps`, at `--max-cost` USD, after 3 steps in a row with no action, or after 3 errors in a row.
+
+Code map:
+
+- `src/sts_cua/loop.py`: screenshot, decide, act, log.
+- `src/sts_cua/models/base.py`: the `Model.decide(Observation) -> Decision` interface every adapter implements.
+- `src/sts_cua/models/claude.py`: Claude adapter on the `computer_toolset_20260801` tool. Each step is a fresh request (cached system prompt and tools, a text log of recent steps, the current screenshot), so nothing is replayed and cost per step stays flat.
+- `src/sts_cua/screen.py`: `X11Screen` (mss capture, xdotool input) and `FakeScreen` for tests.
+- `src/sts_cua/runlog.py`, `src/sts_cua/pricing.py`: run logs and per-step cost.
+
+## Run Slay the Spire 2
+
+Requires Steam for Linux running and logged in inside WSL, Spire 2 installed, and the agent's save profile selected (Profile 3 on Raph's machine).
+
+```
+tools/launch_sts2.sh /tmp/sts2.log      # Xvfb :99 + game on the GPU + layout fix, waits for the main menu
+```
+
+`src/sts_cua/game.py` holds what we learned getting it running on WSL2:
+
+- Launch the binary directly (`SteamAppId`/`SteamGameId` set, Steam running). Through Steam's runtime container the game can't see WSL's GPU libraries and fails to create an OpenGL context.
+- `GALLIUM_DRIVER=d3d12 --rendering-driver opengl3` renders on the RTX 4090 (game log: `Using Device: Microsoft - D3D12 (NVIDIA GeForce RTX 4090)`).
+- The first frame lays out wrong until the window is resized by one pixel and back.
+- SIGTERM is ignored; `game.quit_game` clicks Quit then Yes.
+
+Game settings for agent runs (machine `settings.save` is not cloud-synced; profile prefs are, so change those in-game): 1280x720 windowed at 0,0, vsync off, 30 fps cap, MSAA off, all volumes 0, skip intro. Agent profile: fast mode, no screen shake, no text effects, hand card numbers shown, gameplay data upload off. Keyboard: `1`-`0` select cards, `E` confirm, `Enter` select, `M` map, `Escape` cancel.
+
+## Game state mod (STS2MCP)
+
+[STS2MCP](https://github.com/Gennadiyev/STS2MCP) (MIT) runs a local API on `localhost:15526`. Release 0.4.0 breaks on Spire 2 v0.107, so we build `main` @ 55e0648 (which has the v0.107 fix) with the .NET 9 SDK against the game's own DLLs:
+
+```
+DOTNET_ROOT=~/.dotnet ~/.dotnet/dotnet build STS2_MCP.csproj -c Release \
+  -p:STS2GameDir="$HOME/.steam/debian-installation/steamapps/common/Slay the Spire 2" -o out/STS2_MCP
+```
+
+Copy `STS2_MCP.dll` + `STS2_MCP.json` into `<game>/mods/` and accept the "Load Mods?" dialog. With mods on, the game uses separate `modded/profileN` saves, so the agent's modded Profile 3 can't touch normal saves.
+
+The harness only reads `GET /api/v1/singleplayer` (`src/sts_cua/state.py`) and logs a summary per step as ground truth (screen type, floor, HP, energy, hand, enemies and intents). The agent never sees it; it stays pixel-only. Never call the mod's POST endpoints from the harness.
+
 ## Status
 
-Plan done. Harness in progress.
+Harness runs Spire 2 end to end on Raph's PC. Haiku 5.5 won the first fight of Act 1 (14 steps, $0.0056, run 20261025T164617Z). Next: the supervisor for back-to-back full runs.
