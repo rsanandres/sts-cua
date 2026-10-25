@@ -67,6 +67,13 @@ def action_to_dict(action: Action) -> dict:
     return {"kind": action.kind, **asdict(action)}
 
 
+def action_from_dict(d: dict) -> Action:
+    """Inverse of action_to_dict, for reading run logs back."""
+    kinds = {cls.kind: cls for cls in (Click, Drag, MouseMove, Scroll, Key, TypeText, Wait)}
+    fields = dict(d)
+    return kinds[fields.pop("kind")](**fields)
+
+
 def describe(action: Action) -> str:
     """One-line description used in the history the model sees."""
     if isinstance(action, Click):
