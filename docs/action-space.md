@@ -1,6 +1,6 @@
 # Action space
 
-Everything the agent can press in Slay the Spire 2, grouped by screen. Draft: rows marked **confirmed** were seen on Raph's machine (game v0.107.1, build 23811903); everything else is carried over from Spire 1 or general UI sense and needs checking against real screenshots. Coordinates are for a 1280x720 window.
+Everything the agent can press in Slay the Spire 2, grouped by screen. Draft: rows marked **confirmed** were seen on Raph's machine (game v0.107.1, build 23811903); everything else is a best guess from general UI sense, not yet seen in Spire 2, and needs checking against real screenshots. Coordinates are for a 1280x720 window.
 
 ## Two kinds of action
 
@@ -40,7 +40,7 @@ Every step in the run log gets one of these labels, so we can count inspects per
 | Character portrait | Commit | unverified |
 | Ascension level up/down | Commit | unverified; fix it per experiment |
 | Embark / start | Commit | unverified |
-| Opening choice (Spire 1 had Neow; Spire 2's save data mentions "ancients") | Commit | unverified |
+| Opening choice, if the run starts with one (Spire 2's save data mentions "ancients") | Commit | unverified |
 
 ## Map
 
@@ -60,7 +60,7 @@ Every step in the run log gets one of these labels, so we can count inspects per
 | `Down` | Release the selected card back to hand | Undo selection | confirmed (keybind) |
 | `e` | End turn | Commit | confirmed (keybind "confirm"; verify it ends the turn in combat) |
 | Hover an enemy | Intent (attack value, buff, debuff) and powers | Inspect | unverified; the intent icon may already show on screen |
-| `a` | Draw pile: what's left to draw (Spire 1 showed it unordered) | Inspect | confirmed (keybind); order unverified |
+| `a` | Draw pile: what's left to draw | Inspect | confirmed (keybind); whether it shows draw order is unverified |
 | `s` | Discard pile | Inspect | confirmed (keybind) |
 | `x` | Exhaust pile | Inspect | confirmed (keybind) |
 | `Space` | Peek (keybind name; likely shows the board without the hand) | Inspect | confirmed (keybind); effect unverified |

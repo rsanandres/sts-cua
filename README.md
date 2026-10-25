@@ -40,7 +40,7 @@ A computer-use agent (CUA) that plays Slay the Spire from screen pixels, running
 
 Decided 2026-10-25: build on Spire 2 (Raph owns both). Spire 2 is in Early Access (since 2026-03-05), native Linux, built in Godot.
 
-- No CommunicationMod equivalent exists, so we write our own state-export mod. Spire 2 mods are C# DLLs plus Godot `.pck` files, patching the game with Harmony hooks ([modding tutorial](https://github.com/fresh-milkshake/Modding-Tutorial), pinned to build v0.103.3, may be out of date).
+- No state-export mod exists for Spire 2, so we write our own. Spire 2 mods are C# DLLs plus Godot `.pck` files, patching the game with Harmony hooks ([modding tutorial](https://github.com/fresh-milkshake/Modding-Tutorial), pinned to build v0.103.3, may be out of date).
 - Mega Crit made its built-in mod loader official with Steam Workshop support in Major Update 2 (v0.107.1, 2026-06-19) and calls it barebones ([guide](https://bossdown.com/guides/slay-the-spire-2-steam-workshop-mods/)).
 - A community MCP server maps 144 hooks and 175 overridable methods across combat, cards, damage, powers, turns and rewards. Useful for finding where to read state ([Nexus](https://www.nexusmods.com/slaythespire2/mods/345)). Third-party, unverified.
 - Early Access patches can break the mod and shift the UI, so pin a game build per experiment and record it in each run log.
@@ -74,10 +74,6 @@ How much does reasoning buy you in Spire, and on which decisions? Run the agents
 
 ## Prior work
 
-- [CommunicationMod](https://github.com/ForgottenArbiter/CommunicationMod): lets another process read state and control the game over stdin/stdout. It kills the controller if it does not print "ready" in time, and any stray print to stdout breaks the protocol. Config lives at `~/.config/ModTheSpire/CommunicationMod/config.properties`, so each parallel instance likely needs its own config dir (inference, untested).
-- [spirecomm](https://github.com/ForgottenArbiter/spirecomm): Python client for CommunicationMod, plus a simple scripted AI. A useful baseline to beat.
-- sts_lightspeed (gamerpuppy): RNG-accurate C++ simulator, used by RL projects such as [sts-rl-agent](https://huggingface.co/Jialeiv/sts-rl-agent) (self-reports 14% win rate on 50 seeds vs 6% for the stock heuristics) and [AutoClad](https://github.com/benmuth/AutoClad). Not pixels, but useful later if we ever train a policy.
-- The Spire 1 tools above (CommunicationMod, spirecomm, sts_lightspeed) don't work on Spire 2, but their protocol and bots are good references for our own mod.
 
 ## To verify
 
