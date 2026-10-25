@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass
 from typing import Callable
@@ -23,6 +24,9 @@ class LoopConfig:
     max_errors: int = 3  # stop after this many model or input errors in a row
     max_unchanged: int = 8  # stop after this many acting steps in a row that didn't change the screen
     unchanged_threshold: float = 1.0  # mean per-pixel difference (0-255) below which the screen counts as unchanged
+    # Stop after this many acting steps in a row that left the game state (from state_fn) exactly the same.
+    # Catches loops the screen check misses, e.g. hover tooltips changing pixels while nothing happens.
+    max_stalled: int | None = 15
     # Stop after this many seconds without an action that changed the screen (co-op; None: no limit).
     max_idle_seconds: float | None = None
     poll_seconds: float = 0.5  # how often a rule's wait (hold) re-reads the mod state
@@ -69,8 +73,9 @@ def run(
     """
     config = config or LoopConfig()
     history: list[HistoryEntry] = []
-    idle = errors = unchanged = 0
+    idle = errors = unchanged = stalled = 0
     previous: Image.Image | None = None
+    previous_state: str | None = None
     end_reason = "max_steps"
     last_progress = clock()  # when an action of the agent's last changed the screen
 
@@ -94,6 +99,19 @@ def run(
                     unchanged = 0
                     last_progress = clock()
             previous = screenshot
+            if state is not None:
+                signature = json.dumps(state, sort_keys=True)
+                acted = bool(history) and any(not isinstance(a, Wait) for a in history[-1].actions)
+                if signature != previous_state:
+                    stalled = 0
+                elif acted and not waiting:
+                    stalled += 1
+                previous_state = signature
+                if config.max_stalled and stalled >= config.max_stalled:
+                    log.step(step, screenshot, None, [], error="stuck: game state unchanged", state=state,
+                             waiting=waiting, screen_diff=diff)
+                    end_reason = "stalled"
+                    break
             if config.max_idle_seconds is not None and clock() - last_progress >= config.max_idle_seconds:
                 log.step(step, screenshot, None, [], error="idle timeout: no progress", state=state,
                          waiting=waiting, screen_diff=diff)

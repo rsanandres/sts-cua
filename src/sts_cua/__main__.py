@@ -26,6 +26,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--display", default=":99", help="X display to capture and drive")
     parser.add_argument("--max-steps", type=int, default=20, help=f"step cap (co-op default {coop.MAX_STEPS})")
     parser.add_argument("--max-cost", type=float, default=1.0, help="stop when the run's API cost reaches this many USD")
+    parser.add_argument("--max-stalled", type=int, default=15,
+                        help="stop after this many acting steps in a row with the game state unchanged (0: off)")
     parser.add_argument("--settle", type=float, default=1.0,
                         help=f"seconds to wait after each step (co-op default {coop.SETTLE_SECONDS})")
     parser.add_argument("--runs-dir", default="runs")
@@ -104,9 +106,11 @@ def run_meta(args: argparse.Namespace, model_name: str, screen_size, memory_meta
 
 
 def loop_config(args: argparse.Namespace) -> LoopConfig:
-    config = LoopConfig(max_steps=args.max_steps, max_cost_usd=args.max_cost, settle_seconds=args.settle)
+    config = LoopConfig(max_steps=args.max_steps, max_cost_usd=args.max_cost, settle_seconds=args.settle,
+                        max_stalled=args.max_stalled or None)
     if args.coop:
         config.max_idle_steps = coop.MAX_IDLE_STEPS
+        config.max_stalled = None  # teammates change the state on their own; the idle timeout covers co-op
         config.max_idle_seconds = args.coop_idle_minutes * 60
     return config
 
