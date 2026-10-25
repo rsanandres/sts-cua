@@ -40,11 +40,15 @@ def run(
     config: LoopConfig | None = None,
     state_fn: Callable[[], dict | None] | None = None,
     stop_fn: Callable[[dict | None], str | None] | None = None,
+    notes_fn: Callable[[dict | None], tuple[str, list[str]]] | None = None,
 ) -> dict:
     """state_fn, if given, returns the true game state each step. It is logged, never shown to the model.
 
     stop_fn, if given, is called with each step's state before the model is asked; a string
     return logs the step with no decision and ends the run with that string as end_reason.
+
+    notes_fn, if given, maps that state to (notes text, note ids): lessons from earlier runs
+    shown to the model this step (sts_cua.memory.Retriever). The ids are logged as notes_shown.
     """
     config = config or LoopConfig()
     history: list[HistoryEntry] = []
@@ -71,10 +75,11 @@ def run(
             log.step(step, screenshot, None, [], state=state)
             end_reason = reason
             break
+        notes, notes_shown = notes_fn(state) if notes_fn else ("", None)
         try:
-            decision = model.decide(Observation(step, screenshot, history))
+            decision = model.decide(Observation(step, screenshot, history, notes=notes))
         except Exception as exc:  # API or adapter failure: log it and keep going, up to max_errors
-            log.step(step, screenshot, None, [], error=f"model: {exc!r}", state=state)
+            log.step(step, screenshot, None, [], error=f"model: {exc!r}", state=state, notes_shown=notes_shown)
             errors += 1
             if errors >= config.max_errors:
                 end_reason = "model_errors"
@@ -90,7 +95,7 @@ def run(
                 break
             executed.append(action)
 
-        log.step(step, screenshot, decision, executed, error, state=state)
+        log.step(step, screenshot, decision, executed, error, state=state, notes_shown=notes_shown)
         history.append(HistoryEntry(step, decision.thought, executed))
 
         if decision.done:

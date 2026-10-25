@@ -142,6 +142,8 @@ class ClaudeModel:
             history_text = "This is the first step."
 
         goal_text = f"Goal: {self.config.goal}\n\n" if self.config.goal else ""
+        # Notes change per step, so they live in the user message, after the cached tools + system prefix.
+        notes_text = f"{obs.notes}\n\n" if obs.notes else ""
         request = {
             "model": self.config.model,
             "max_tokens": self.config.max_tokens or (16000 if self.config.thinking == "on" else 2048),
@@ -154,7 +156,7 @@ class ClaudeModel:
                 "role": "user",
                 "content": [
                     {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": _png_base64(image)}},
-                    {"type": "text", "text": f"{goal_text}Step {obs.step}. Screenshot is {image.width}x{image.height}.\n\n{history_text}\n\n{instruction}"},
+                    {"type": "text", "text": f"{goal_text}Step {obs.step}. Screenshot is {image.width}x{image.height}.\n\n{notes_text}{history_text}\n\n{instruction}"},
                 ],
             }],
             **self._thinking,

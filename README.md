@@ -136,6 +136,7 @@ Code map:
 - `src/sts_cua/models/qwen.py`: Qwen3-VL adapter for vLLM's OpenAI-compatible server, the same fresh request each step.
 - `src/sts_cua/screen.py`: `X11Screen` (mss capture, xdotool input) and `FakeScreen` for tests.
 - `src/sts_cua/runlog.py`, `src/sts_cua/pricing.py`: run logs and per-step cost.
+- `src/sts_cua/memory/`: lessons carried between runs (see "Memory across runs").
 
 ## Run Slay the Spire 2
 
@@ -182,6 +183,24 @@ If the game isn't on the main menu with no saved run before a run, a short reset
 
 - `src/sts_cua/supervisor.py`: the session loop and budget accounting.
 - `src/sts_cua/score.py`: outcome, score and per-combat breakdown from a run's logged states (`load_states(run_dir)`), and the stop check (`RunOverDetector`).
+
+## Memory across runs
+
+The agent improves across runs without weight updates: after each run it writes a few short lessons, and later runs see the ones that match the current screen.
+
+```
+python -m sts_cua --model claude-haiku-5-5 --memory memory/notes.jsonl ...   # show matching notes each step
+python -m sts_cua.memory reflect runs/<run>      # score the run, then one Claude call (Sonnet 5.5) edits the store
+python -m sts_cua.memory score runs/<run>        # only update note utilities (reflect already does this)
+python -m sts_cua.memory list | show <id> | retire <id>
+python -m sts_cua.memory reflect runs/<run> --dry-run   # print the request, no API call
+```
+
+- **Store:** `memory/notes.jsonl`, one note per line: kind (ui, enemy, card, event, strategy, pitfall), keys (screen, enemy, card, event, act, character, game_version), text up to 300 characters, status (probation, active, retired), utility stats, source runs. The store is generated on Raph's PC from his runs, so `memory/` is in `.gitignore`.
+- **Retrieval** (`memory/retrieve.py`, plain code, no model call): a note applies when all its keys match what is on screen (screen type, enemy names, card names in hand, event title, act). Keys may only name things visible on screen; the mod's state is used only because it already names them. Active notes are shown best utility first, capped at ~600 tokens, plus an always-on playbook of general strategy notes capped at ~1,500 tokens. Probation notes are shown on a seeded coin flip per floor so whole combats are A/B units; the seed is in `meta.json` and each step logs `notes_shown`.
+- **Delivery:** the notes go into the per-step user message, after the cached tools and system prompt, labelled as lessons from earlier runs.
+- **Reflect** (`memory/reflect.py`): one call with a digest of the run (per-combat HP table, outcome, wasted or erroring steps, the agent's thoughts at key moments, the notes it was shown with their stats). It returns delta operations only: ADD (at most 3, deduped against notes with the same keys), UPDATE, DOWNVOTE, RETIRE. Cost goes to `memory_reflect.json` in the run directory.
+- **Validation gate** (`memory/score.py`): per note, loss when shown vs hidden (HP lost per combat as a share of max HP for enemy, card and strategy notes; share of wasted steps per screen visit for ui, pitfall and event notes). Utility = hidden minus shown, with a simple Welch interval. Probation becomes active when the lower bound is above 0 after 5 shown and 3 hidden units; any note is retired when the upper bound is below 0. Results go to `memory_score.json`. Fights come from `sts_cua.score.combats`, and reset runs (meta `kind: "reset"`) are neither scored nor reflected on. The supervisor doesn't take `--memory` yet.
 
 ## Status
 

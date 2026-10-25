@@ -28,6 +28,8 @@ class Observation:
     step: int
     screenshot: Image.Image
     history: list[HistoryEntry]
+    # Lessons from earlier runs picked for this step (sts_cua.memory); empty when memory is off.
+    notes: str = ""
 
 
 @dataclass

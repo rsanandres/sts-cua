@@ -85,11 +85,8 @@ def test_first_step_and_default_goal(frame):
 
 
 def test_notes_included_when_present(frame):
-    class WithNotes(Observation):
-        notes = "Nibbit: block on turn 2."
-
     transport = FakeTransport(completion(call(action="wait", time=1)))
-    QwenModel(transport=transport).decide(WithNotes(1, frame, []))
+    QwenModel(transport=transport).decide(Observation(1, frame, [], notes="Nibbit: block on turn 2."))
     text = transport.calls[0][1]["messages"][1]["content"][0]["text"]
     assert text.endswith("Notes:\nNibbit: block on turn 2.")
 

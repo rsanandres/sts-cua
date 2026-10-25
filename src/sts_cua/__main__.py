@@ -27,10 +27,23 @@ def main(argv: list[str] | None = None) -> None:
                         help="STS2MCP game state endpoint, logged each step as ground truth (never shown to the model)")
     parser.add_argument("--no-state", action="store_true", help="don't read game state from the mod")
     add_model_args(parser)
+    parser.add_argument("--memory", metavar="PATH",
+                        help="note store, e.g. memory/notes.jsonl: show matching lessons from earlier runs each step")
     args = parser.parse_args(argv)
 
     screen = X11Screen(args.display)
     model = build_model(args)
+
+    notes_fn, memory_meta = None, None
+    if args.memory:
+        import random
+
+        from .memory import NoteStore, Retriever
+
+        game_version = None if args.game_build == "unknown" else args.game_build
+        notes_fn = Retriever(NoteStore.load(args.memory), seed=random.randrange(2**31), game_version=game_version)
+        memory_meta = {"path": args.memory, "seed": notes_fn.seed, "game_version": game_version,
+                       "notes": len(notes_fn.notes)}
 
     log = RunLog(args.runs_dir, meta={
         "model": model.name,
@@ -42,6 +55,7 @@ def main(argv: list[str] | None = None) -> None:
         "goal": args.goal,
         "max_steps": args.max_steps,
         "max_cost_usd": args.max_cost,
+        **({"memory": memory_meta} if memory_meta else {}),
     })
     state_fn = None
     if not args.no_state:
@@ -50,7 +64,7 @@ def main(argv: list[str] | None = None) -> None:
         state_fn = lambda: summarize(fetch_state(args.state_url))  # noqa: E731
     summary = run(model, screen, log, LoopConfig(
         max_steps=args.max_steps, max_cost_usd=args.max_cost, settle_seconds=args.settle,
-    ), state_fn=state_fn)
+    ), state_fn=state_fn, notes_fn=notes_fn)
     print(json.dumps({"run_dir": str(log.dir), **summary}, indent=2))
 
 

@@ -37,6 +37,7 @@ class RunLog:
         executed: list[Action],
         error: str | None = None,
         state: dict | None = None,
+        notes_shown: list[str] | None = None,
     ) -> None:
         shot_name = f"screenshots/step_{step:04d}.png"
         screenshot.save(self.dir / shot_name)
@@ -67,6 +68,8 @@ class RunLog:
         record["executed"] = [action_to_dict(a) for a in executed]
         if state is not None:
             record["state"] = state
+        if notes_shown is not None:
+            record["notes_shown"] = notes_shown
         if error:
             record["error"] = error
         self._steps.write(json.dumps(record) + "\n")
