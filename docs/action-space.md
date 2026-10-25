@@ -54,7 +54,8 @@ Act 1 is "Overgrowth". The top bar shows HP, gold, 3 potion slots, floor number,
 | Element | Kind | Status |
 |---|---|---|
 | First node: a single large, pulsing fight node at bottom centre (~605,512); the run is on floor 0 until it's clicked | Commit | confirmed. Haiku misread it as "where I am standing" |
-| Next reachable node (fight, elite, rest, shop, event, treasure, boss) | Commit | unverified |
+| Next reachable node (fight, elite, rest, shop, event, treasure, boss): directly **above** the player marker; paths go upward | Commit | confirmed (run 20261025T165758Z) |
+| Hover a node below the marker (already visited) | Tooltip with that floor's history, e.g. "Floor 2… Rewards: 17 Gold, Inflame; Skipped: Breakthrough, Anger" | Inspect | confirmed. Haiku clicked a visited node 39 times thinking it was the next choice |
 | Scroll the map up and down to see further acts | Inspect | unverified |
 | Legend or hover a node type | Inspect | unverified |
 
@@ -97,6 +98,10 @@ Seen in run 20261025T090109Z (Haiku vs Nibbit, first fight of Act 1).
 
 - Pressing a card number three times to "play three cards": the presses toggle one card on and off.
 - Missing the selected-card state: a selected card is drawn large mid-screen and can cover the enemy, which the model read as "the enemy is gone".
+
+## Mod state types seen so far
+
+`GET /api/v1/singleplayer` `state_type` values met in runs: `menu`, `map`, `monster` (combat), `rewards`, `card_reward`, `event`. The run log keeps a summary per step.
 
 ## Rewards (after combat)
 

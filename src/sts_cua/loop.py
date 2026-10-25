@@ -6,6 +6,8 @@ import time
 from dataclasses import dataclass
 from typing import Callable
 
+from PIL import Image, ImageChops, ImageStat
+
 from .actions import Wait
 from .models.base import HistoryEntry, Model, Observation
 from .runlog import RunLog
@@ -19,6 +21,16 @@ class LoopConfig:
     settle_seconds: float = 1.0  # let animations finish before the next screenshot
     max_idle_steps: int = 3  # stop after this many steps in a row with no action
     max_errors: int = 3  # stop after this many model or input errors in a row
+    max_unchanged: int = 8  # stop after this many acting steps in a row that didn't change the screen
+    unchanged_threshold: float = 1.0  # mean per-pixel difference (0-255) below which the screen counts as unchanged
+
+
+def screen_diff(a: Image.Image, b: Image.Image) -> float:
+    """Mean absolute pixel difference on a small grayscale copy, 0 (same) to 255."""
+    size = (160, 90)
+    small_a = a.convert("L").resize(size)
+    small_b = b.convert("L").resize(size)
+    return ImageStat.Stat(ImageChops.difference(small_a, small_b)).mean[0]
 
 
 def run(
@@ -31,11 +43,23 @@ def run(
     """state_fn, if given, returns the true game state each step. It is logged, never shown to the model."""
     config = config or LoopConfig()
     history: list[HistoryEntry] = []
-    idle = errors = 0
+    idle = errors = unchanged = 0
+    previous: Image.Image | None = None
     end_reason = "max_steps"
 
     for step in range(1, config.max_steps + 1):
         screenshot = screen.capture()
+        if previous is not None and history and any(not isinstance(a, Wait) for a in history[-1].actions):
+            if screen_diff(previous, screenshot) < config.unchanged_threshold:
+                history[-1].unchanged = True
+                unchanged += 1
+                if unchanged >= config.max_unchanged:
+                    log.step(step, screenshot, None, [], error="stuck: screen unchanged", state=state_fn() if state_fn else None)
+                    end_reason = "stuck"
+                    break
+            else:
+                unchanged = 0
+        previous = screenshot
         state = state_fn() if state_fn else None
         try:
             decision = model.decide(Observation(step, screenshot, history))

@@ -48,6 +48,11 @@ Combat:
 - Hand numbers shift left to right after every card you play, so read them again from each new screenshot.
 - End your turn with e only when no card is selected.
 
+Map:
+- Your position is marked on the map. Paths go upward from it: the next nodes you can choose are the ones connected directly above your marker.
+- Nodes below your marker are floors you already finished. Hovering one shows a tooltip with that floor's past rewards; that means you are looking at history, not a choice.
+- The floor number in the top bar tells you how far you have climbed.
+
 Prefer a shortcut when one fits; click for everything else. If the screen is still animating or loading, use wait instead of acting.
 
 When the goal is complete, don't take any action: reply with the word DONE and one line saying what you see."""
@@ -130,7 +135,8 @@ class ClaudeModel:
             for entry in history:
                 done = "; ".join(describe(a) for a in entry.actions) or "no action"
                 note = f" ({entry.thought})" if entry.thought else ""
-                lines.append(f"Step {entry.step}: {done}{note}")
+                effect = " -> the screen did not change" if entry.unchanged else ""
+                lines.append(f"Step {entry.step}: {done}{effect}{note}")
             history_text = "Your recent steps:\n" + "\n".join(lines)
         else:
             history_text = "This is the first step."
