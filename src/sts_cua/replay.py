@@ -117,11 +117,14 @@ def highlights(steps: list[dict], diffs: list[float | None], summary: dict) -> l
             if fighting and not in_fight:
                 in_fight, fight_start_hp, foe = True, _hp(state), _enemies(state)
                 out.append(Highlight(record["step"], "fight", f"Fight starts: {foe} ({stype})"))
-            elif in_fight and not fighting and stype != "game_over":
+            elif in_fight and not fighting:
                 in_fight = False
                 hp, start = _hp(state), fight_start_hp
-                lost = f", lost {start - hp} HP" if hp is not None and start is not None else ""
-                out.append(Highlight(record["step"], "fight won", f"Beat {foe}{lost} (HP {hp})"))
+                if stype == "game_over" or not hp:  # died, or left the run (menu states have no HP)
+                    out.append(Highlight(record["step"], "fight lost", f"Lost to {foe}"))
+                else:
+                    lost = f", lost {start - hp} HP" if start is not None else ""
+                    out.append(Highlight(record["step"], "fight won", f"Beat {foe}{lost} (HP {hp})"))
             hp, prev_hp = _hp(state), _hp(prev_state)
             if hp is not None and prev_hp is not None and prev_hp - hp >= BIG_HIT:
                 out.append(Highlight(record["step"], "big hit", f"Took {prev_hp - hp} damage (HP {hp})"))

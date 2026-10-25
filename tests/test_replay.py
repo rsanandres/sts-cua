@@ -107,3 +107,15 @@ def test_recorder_command(tmp_path):
     assert cmd[cmd.index("-video_size") + 1] == "1280x720"
     assert cmd[cmd.index("-i") + 1] == ":99"
     assert cmd[-1] == str(tmp_path / "screen.mp4")
+
+
+def test_death_is_a_lost_fight_not_a_win(tmp_path):
+    run_dir = write_run(tmp_path, [
+        {"state": fight_state(8, 18, ("Assassin Raider",)), "executed": CLICK},
+        {"state": fight_state(8, 1, ("Assassin Raider",)), "executed": CLICK},
+        {"state": {"state_type": "game_over", "floor": 8, "player": {"hp": 0, "max_hp": 80}}, "executed": CLICK},
+        {"state": {"state_type": "menu", "menu_screen": "timeline"}, "executed": CLICK},
+    ])
+    _, steps, summary = load_run(run_dir)
+    items = [(h.step, h.kind) for h in highlights(steps, step_diffs(run_dir, steps), summary)]
+    assert items == [(1, "fight"), (2, "big hit"), (3, "fight lost"), (3, "run over")]
