@@ -10,9 +10,13 @@ from sts_cua.screen import xdotool_args
 
 
 def test_click_args():
-    assert xdotool_args(Click(10, 20)) == ["mousemove", "--sync", "10", "20", "sleep", "0.25", "click", "--repeat", "1", "1"]
+    assert xdotool_args(Click(10, 20)) == [
+        "mousemove", "--sync", "10", "20", "sleep", "0.25", "mousedown", "1", "sleep", "0.2", "mouseup", "1",
+    ]
     assert xdotool_args(Click(1, 2, button="right", count=2)) == [
-        "mousemove", "--sync", "1", "2", "sleep", "0.25", "click", "--repeat", "2", "3",
+        "mousemove", "--sync", "1", "2", "sleep", "0.25",
+        "mousedown", "3", "sleep", "0.2", "mouseup", "3",
+        "sleep", "0.08", "mousedown", "3", "sleep", "0.2", "mouseup", "3",
     ]
 
 
@@ -20,7 +24,7 @@ def test_click_with_modifiers_releases_in_reverse():
     args = xdotool_args(Click(5, 5, modifiers="ctrl+shift"))
     assert args == [
         "mousemove", "--sync", "5", "5", "sleep", "0.25", "keydown", "ctrl", "keydown", "shift",
-        "click", "--repeat", "1", "1", "keyup", "shift", "keyup", "ctrl",
+        "mousedown", "1", "sleep", "0.2", "mouseup", "1", "keyup", "shift", "keyup", "ctrl",
     ]
 
 

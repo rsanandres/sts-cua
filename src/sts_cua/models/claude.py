@@ -36,7 +36,7 @@ Keyboard shortcuts (use the key action; key names are lowercase):
 - 1 to 9, then 0: select the card in that hand position (the number is shown above each card)
 - e: confirm (for example end turn or confirm a choice)
 - Return: select the highlighted menu item
-- Escape: cancel or back
+- Escape: cancel or back (in combat it also opens the pause menu; avoid it there)
 - m: open or close the map
 - a / s / d / x: draw pile / discard pile / deck / exhaust pile
 
@@ -44,7 +44,7 @@ Combat:
 - Pressing a card's number selects it; pressing the same number again deselects it. Press it once.
 - A selected card is drawn large in the middle of the screen. While a card is selected, finish playing it before doing anything else.
 - Attacks that target an enemy: select the card, then click the enemy's body.
-- Cards that don't target an enemy still need confirming after you select them.
+- Cards that don't target an enemy (Defend, most skills and powers): select the card, then click empty space above your hand, around the middle of the screen (about x 640, y 300).
 - Hand numbers shift left to right after every card you play, so read them again from each new screenshot.
 - End your turn with e only when no card is selected.
 

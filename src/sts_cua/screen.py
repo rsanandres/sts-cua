@@ -15,6 +15,8 @@ _BUTTONS = {"left": "1", "middle": "2", "right": "3"}
 # Spire 2 (Godot) only registers a click on a target the pointer is already hovering;
 # a click that arrives together with the move is ignored. Pause after moving.
 HOVER_SECONDS = "0.25"
+# An instant click doesn't play a held non-targeted card; a press held this long does.
+PRESS_SECONDS = "0.2"
 _SCROLL_BUTTONS = {"up": "4", "down": "5", "left": "6", "right": "7"}
 
 
@@ -33,7 +35,11 @@ def xdotool_args(action: Action) -> list[str] | None:
         mods = action.modifiers.split("+") if action.modifiers else []
         for mod in mods:
             args += ["keydown", mod]
-        args += ["click", "--repeat", str(action.count), _BUTTONS[action.button]]
+        button = _BUTTONS[action.button]
+        for i in range(action.count):
+            if i:
+                args += ["sleep", "0.08"]
+            args += ["mousedown", button, "sleep", PRESS_SECONDS, "mouseup", button]
         for mod in reversed(mods):
             args += ["keyup", mod]
         return args

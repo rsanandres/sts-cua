@@ -83,9 +83,10 @@ Seen in run 20261025T090109Z (Haiku vs Nibbit, first fight of Act 1).
 |---|---|---|---|
 | `1`-`9`, `0` | Select the card in that slot. **Pressing the same number again deselects it.** | Commit, part 1 | confirmed |
 | Click the enemy body with a targeted card selected | Play it on that enemy | Commit | confirmed, **only if the pointer was already hovering the enemy**. The harness now moves, waits 0.25 s, then clicks |
-| Confirm a non-targeted card (Defend) | Play it | Commit | **untested**: `e`, `Enter`, or a click on the player |
+| Click empty space above the hand ≈(640,300) with a non-targeted card selected (Defend) | Play it | Commit | confirmed, with a **slow click** (hold 0.2 s). Instant clicks, `Return`, `e`, clicking the player, and dragging the card do not play it. The harness now holds every click 0.2 s |
 | `e` with no card selected | End turn | Commit | confirmed |
-| `e` with a card selected | Probably confirms the card (`ui_accept`) | Commit | untested |
+| `e` with a card selected | Nothing (doesn't confirm, doesn't end the turn) | None | confirmed |
+| `Escape` in combat | Cancels the selection and opens the Pause menu (Resume, Settings, Give Up, Save and Quit) | Navigation | confirmed; avoid. "Give Up" ends the run |
 | Hover the enemy | Tooltip, e.g. "Aggressive: This enemy intends to Attack for 12 damage" ≈(745,433) | Inspect | confirmed |
 | `Down` | Release the selected card back to hand | Undo selection | keybind confirmed, effect untested |
 | `a` / `s` / `x` | Draw / discard / exhaust pile | Inspect | keybinds confirmed, views not yet seen |
