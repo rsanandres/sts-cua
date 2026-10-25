@@ -111,7 +111,9 @@ def highlights(steps: list[dict], diffs: list[float | None], summary: dict) -> l
 
         if state:
             floor, prev_floor = state.get("floor"), (prev_state or {}).get("floor")
-            if floor is not None and prev_floor is not None and floor > prev_floor:
+            if prev_state is not None and prev_floor is None and floor is not None:
+                out.append(Highlight(record["step"], "floor", f"Run starts on floor {floor}"))
+            elif floor is not None and prev_floor is not None and floor > prev_floor:
                 out.append(Highlight(record["step"], "floor", f"Reached floor {floor}"))
             fighting = stype in COMBAT_TYPES and bool(state.get("enemies"))
             if fighting and not in_fight:

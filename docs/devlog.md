@@ -90,6 +90,20 @@ Make footage from any run with `python -m sts_cua.replay runs/<run>` (see the RE
 - Problems both models share: leaving the shop, never using potions, and the screens after a run. The first two look like missing tutorial knowledge, not strategy.
 - Replays exist for both runs (`replay.mp4` and `highlights.md` in each run folder): 2:22 for Haiku, 1:07 for Sonnet.
 
+### A clean start on Sonnet, recorded
+
+- Run `20261025T191243Z`: a fresh run with Sonnet 5.5 (thinking on, effort low) and screen recording on. It reached floor 5 at 63/70 HP and said DONE: 72 steps, $0.46, 13 minutes. It's the first run with both `screen.mp4` (12:59) and `replay.mp4` (1:48).
+- It started on the Timeline screen left by the last death. It revealed the waiting Epoch, which unlocked the Silent, then went back to the menu.
+- The game now preselects the Silent, so "default character" meant the Silent. Goals should name the character from now on.
+- At the opening Ancient event it took Lead Paperweight, avoiding a curse, then Thrumming Hatchet.
+- On the map it clicked the bottom node twice, but after an opening event that node is a cave and already done. Then it picked the node above it. The prompt is fixed to cover this (PR #21).
+- Three fights, 7 HP lost in total:
+  - Slimes: 0 HP lost. Took Noxious Fumes.
+  - Nibbit: 2 HP lost. Took Deflect and a Flex Potion.
+  - Shrinker Beetle: 5 HP lost. Took Bouncing Flask.
+- Compared with Haiku on similar floors, which lost 12-19 HP per fight, Sonnet blocks and sequences far better. It costs $0.0064 a step against Haiku's $0.0004.
+- At about 14 steps a floor, a full run (about 50 floors) on Sonnet would cost several dollars, more than the $2/day budget. Haiku could do one for well under $1.
+
 ## Clip ideas
 
 - The 39-click loop on a visited node (`20261025T165758Z`).
@@ -99,4 +113,5 @@ Make footage from any run with `python -m sts_cua.replay runs/<run>` (see the RE
 - The merchant loop (`20261025T181542Z`, steps 69-75).
 - Sonnet starting at 18 HP, spending its gold on a card instead of healing, then dying on floor 8 with two potions unused (`20261025T183740Z`).
 - Both models getting lost leaving the merchant.
+- Sonnet's clean floors 1-5 with 7 HP lost, against Haiku's 12-19 HP per fight (`20261025T191243Z`, with real-time footage).
 - Haiku vs Sonnet on the same floors, with the cost per floor.

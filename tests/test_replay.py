@@ -119,3 +119,14 @@ def test_death_is_a_lost_fight_not_a_win(tmp_path):
     _, steps, summary = load_run(run_dir)
     items = [(h.step, h.kind) for h in highlights(steps, step_diffs(run_dir, steps), summary)]
     assert items == [(1, "fight"), (2, "big hit"), (3, "fight lost"), (3, "run over")]
+
+
+def test_first_in_run_state_after_the_menu_is_a_floor_row(tmp_path):
+    run_dir = write_run(tmp_path, [
+        {"state": {"state_type": "menu", "menu_screen": "main"}, "executed": CLICK},
+        {"state": {"state_type": "event", "floor": 1, "player": {"hp": 70, "max_hp": 70}}, "executed": CLICK},
+        {"state": map_state(1, 70), "executed": CLICK},
+    ])
+    _, steps, summary = load_run(run_dir)
+    found = [(h.step, h.kind, h.text) for h in highlights(steps, step_diffs(run_dir, steps), summary)]
+    assert found == [(2, "floor", "Run starts on floor 1")]
