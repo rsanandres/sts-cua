@@ -6,7 +6,9 @@ plus 52/3 per boss killed.
 Everything here works on a plain list of summarized states, one per step in order
 (None where the mod wasn't reachable), so it runs the same on a live run and on a
 finished run's steps.jsonl. Schema facts come from state.py's docstring; inferences
-are marked "Assumption".
+are marked "Assumption". The outcome, floor and seed recorded by the game itself
+(sts_cua.history) win over these inferences when the supervisor finds the run there;
+score_run stays the per-combat breakdown and the fallback.
 """
 
 from __future__ import annotations
@@ -19,8 +21,9 @@ from .state import COMBAT_TYPES
 
 BOSS_POINTS = 52 / 3
 WIN_SCORE = 100.0
-# Assumption: Spire 2 Early Access ends after the Act 3 boss(es). The mod doesn't say
-# how many acts a run has.
+# Assumption: Spire 2 Early Access ends after the Act 3 boss(es). The singleplayer state
+# doesn't say how many acts a run has. Only a fallback: the supervisor takes the outcome
+# from the mod's run history (sts_cua.history) when it finds the run there.
 FINAL_ACT = 3
 # Menu screens that are overlays (tutorials, popups) and can show up mid-run.
 _OVERLAY_MENUS = ("tutorial_prompt", "tutorial", "popup")
@@ -138,8 +141,8 @@ def _combat(states: list[dict | None], segment: list[int], after: dict | None) -
     elif after is None:
         result = "unfinished"
     elif after_type == "game_over":
-        # Assumption: the game-over screen also follows a win, and Give Up shows it with HP
-        # left. A fight that goes straight to it with HP > 0 counts as won only for a
+        # Assumption (fallback only, see sts_cua.history): the game-over screen also follows
+        # a win, and Give Up shows it with HP left. A fight that goes straight to it with HP > 0 counts as won only for a
         # final-act boss; anywhere else it was given up.
         final_boss = room == "boss" and (first.get("act") or 0) >= FINAL_ACT
         result = "won" if final_boss and (hp_end is None or hp_end > 0) else "abandoned"
@@ -164,6 +167,13 @@ def _final_bosses(states: list[dict | None]) -> int:
         if in_run(s) and (s.get("act") or 0) >= FINAL_ACT and s.get("bosses"):
             return len(s["bosses"])
     return 1
+
+
+def points(outcome: str, max_floor: int | None, bosses_killed: int) -> float:
+    """The score: 100 for a win, otherwise floor + 52/3 per boss killed."""
+    if outcome == "won":
+        return WIN_SCORE
+    return round((max_floor or 0) + BOSS_POINTS * bosses_killed, 2)
 
 
 def score_run(states: list[dict | None]) -> RunScore:
@@ -191,12 +201,8 @@ def score_run(states: list[dict | None]) -> RunScore:
         outcome = "unknown"  # the log ended mid-run, or no run ever started
 
     max_floor = max(floors) if floors else None
-    if outcome == "won":
-        score = WIN_SCORE
-    else:
-        score = round((max_floor or 0) + BOSS_POINTS * len(bosses), 2)
     return RunScore(
-        outcome=outcome, score=score, max_floor=max_floor, act=last.get("act"), bosses_killed=len(bosses),
+        outcome=outcome, score=points(outcome, max_floor, len(bosses)), max_floor=max_floor, act=last.get("act"), bosses_killed=len(bosses),
         character=last.get("character"), ascension=last.get("ascension"), started=bool(run_states), combats=fights,
     )
 

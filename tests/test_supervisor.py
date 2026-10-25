@@ -1,4 +1,5 @@
 import json
+import time
 from datetime import date, datetime, timezone
 
 import pytest
@@ -7,6 +8,7 @@ from memory_runs import FakeClient
 
 from sts_cua import supervisor
 from sts_cua.actions import Click
+from sts_cua.history import parse_history
 from sts_cua.memory.store import NoteStore
 from sts_cua.models.base import Decision, Usage
 from sts_cua.screen import FakeScreen
@@ -71,7 +73,7 @@ class Pricey:
         return Decision(thought="", actions=[Click(obs.step, obs.step)], usage=Usage(cost_usd=0.1))
 
 
-def run_session(tmp_path, frame, game, models=None, client_factory=None, **overrides):
+def run_session(tmp_path, frame, game, models=None, client_factory=None, history_fn=None, sleep=None, **overrides):
     goals = []
 
     def model_factory(goal):
@@ -85,7 +87,8 @@ def run_session(tmp_path, frame, game, models=None, client_factory=None, **overr
     config = SupervisorConfig(runs_dir=tmp_path, settle_seconds=0, state_retry_seconds=0, game_build="v0.107.1",
                               **settings)
     session = supervise(config, model_factory, lambda: FakeScreen([frame]), game, echo=lambda _: None,
-                        reflect_client_factory=client_factory)
+                        reflect_client_factory=client_factory, history_fn=history_fn,
+                        **({"sleep": sleep} if sleep else {}))
     return session, goals
 
 
@@ -268,3 +271,111 @@ def test_cli_memory_flags(monkeypatch):
     assert str(configs[0].memory_path) == "memory/notes.jsonl" and configs[0].reflect is False
     assert configs[0].reflect_reserve_usd == 0.2
     assert configs[1].memory_path is None and configs[1].reflect is True and configs[1].reflect_reserve_usd == 0.05
+
+
+# Run history: the game's own record of how each run ended.
+def history_entry(stem, start_time, win=False, abandoned=False, points=1, character="CHARACTER.IRONCLAD"):
+    """A run_history entry shaped like the mod's BuildRunHistoryEntry output."""
+    return {"id": stem, "run_id": f"modded:profile3:{stem}", "file_name": f"{stem}.run", "start_time": start_time,
+            "win": win, "was_abandoned": abandoned, "seed": f"SEED-{stem}", "ascension": 0, "game_mode": "standard",
+            "players": [{"id": 1, "character": character, "deck_count": 12}], "map_point_count": points}
+
+
+class FakeHistory:
+    """Hands out scripted run histories (raw entry lists, or None for unreachable), repeating the last."""
+
+    def __init__(self, *responses):
+        self.responses = list(responses)
+        self.calls = 0
+
+    def __call__(self):
+        self.calls += 1
+        raw = self.responses.pop(0) if len(self.responses) > 1 else self.responses[0]
+        if isinstance(raw, Exception):
+            raise raw
+        return None if raw is None else parse_history({"sections": {"run_history": {"entries": raw}}})
+
+
+def one_run(final):
+    return FakeGame([menu(), menu(), room("map", 0), fight("monster", 1, 1, 80, "Nibbit"), final])
+
+
+def read_score(tmp_path, entry):
+    return json.loads((tmp_path / entry["run_dir"].split("/")[-1] / "score.json").read_text())
+
+
+OLD_RUN = history_entry("1777000000", 1777000000, abandoned=True, points=4)
+
+
+def test_history_is_the_source_of_truth(tmp_path, frame):
+    now = int(time.time())
+    new = history_entry(str(now), now, win=True, points=2)
+    history = FakeHistory([OLD_RUN], [new, OLD_RUN])
+    # The states see a game over with HP left after a monster: they'd call it a Give Up.
+    session, _ = run_session(tmp_path, frame, one_run(game_over(1, 1, 40)), history_fn=history,
+                             daily_budget_usd=100, max_runs=1)
+    (entry,) = session.runs
+    assert history.calls == 2  # snapshot before, lookup after
+    assert entry["outcome"] == "won" and entry["outcome_source"] == "compendium" and entry["outcome_states"] == "abandoned"
+    assert entry["seed"] == f"SEED-{now}" and entry["floor"] == 2 and entry["score"] == 100
+    score = read_score(tmp_path, entry)
+    assert score["outcome"] == "won" and score["outcome_states"] == "abandoned" and score["seed"] == f"SEED-{now}"
+    assert score["max_floor"] == 2 and score["max_floor_states"] == 1 and score["score"] == 100
+    assert score["history"]["id"] == str(now) and score["history"]["match"] == "new_id"
+    assert score["combats"][0]["enemies"] == ["Nibbit"]  # the per-combat breakdown still comes from the states
+    ledger = [json.loads(l) for l in (tmp_path / "ledger.jsonl").read_text().splitlines()]
+    assert ledger == session.runs
+
+
+def test_history_agrees_and_waits_for_the_file(tmp_path, frame):
+    now = int(time.time())
+    new = history_entry(str(now), now, points=1)
+    sleeps = []
+    # Snapshot, then the file isn't there on the first lookup.
+    history = FakeHistory([OLD_RUN], [OLD_RUN], [new, OLD_RUN])
+    session, _ = run_session(tmp_path, frame, one_run(game_over(1, 1, 0)), history_fn=history, sleep=sleeps.append,
+                             daily_budget_usd=100, max_runs=1, history_retry_seconds=1.5)
+    (entry,) = session.runs
+    assert history.calls == 3 and sleeps == [1.5]
+    assert entry["outcome"] == "died" and entry["outcome_source"] == "compendium" and entry["outcome_states"] is None
+    assert entry["seed"] == f"SEED-{now}"
+    assert read_score(tmp_path, entry)["max_floor_states"] is None
+
+
+def test_history_unreachable_falls_back_to_states(tmp_path, frame):
+    sleeps = []
+    history = FakeHistory(None)
+    session, _ = run_session(tmp_path, frame, one_run(game_over(1, 1, 0)), history_fn=history, sleep=sleeps.append,
+                             daily_budget_usd=100, max_runs=1)
+    (entry,) = session.runs
+    assert history.calls == 4 and len(sleeps) == 2  # snapshot, then 3 lookups
+    assert entry["outcome"] == "died" and entry["outcome_source"] == "states"
+    assert entry["seed"] is None and entry["outcome_states"] is None
+    score = read_score(tmp_path, entry)
+    assert score["outcome_source"] == "states" and score["history"] is None and score["score"] == 1
+
+    # A history call that raises is no worse.
+    broken = FakeHistory(OSError("boom"))
+    session, _ = run_session(tmp_path / "b", frame, one_run(game_over(1, 1, 0)), history_fn=broken,
+                             sleep=sleeps.append, daily_budget_usd=100, max_runs=1)
+    assert session.runs[0]["outcome_source"] == "states" and session.runs[0]["outcome"] == "died"
+
+
+def test_history_without_snapshot_matches_by_time(tmp_path, frame):
+    now = int(time.time())
+    new = history_entry(str(now), now, points=1)
+    history = FakeHistory(None, [new, OLD_RUN])  # the mod was down for the snapshot
+    session, _ = run_session(tmp_path, frame, one_run(game_over(1, 1, 0)), history_fn=history,
+                             daily_budget_usd=100, max_runs=1)
+    entry = session.runs[0]
+    assert entry["outcome_source"] == "compendium" and read_score(tmp_path, entry)["history"]["match"] == "time_window"
+
+
+def test_unfinished_run_looks_up_once(tmp_path, frame):
+    history = FakeHistory([OLD_RUN])
+    sleeps = []
+    session, _ = run_session(tmp_path, frame, FakeGame([]), history_fn=history, sleep=sleeps.append,
+                             daily_budget_usd=100, max_steps=1, max_runs=1)
+    entry = session.runs[0]
+    assert entry["end_reason"] == "max_steps" and entry["outcome_source"] == "states" and entry["outcome"] == "unknown"
+    assert history.calls == 2 and sleeps == []
