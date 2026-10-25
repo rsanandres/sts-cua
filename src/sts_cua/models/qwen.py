@@ -163,7 +163,7 @@ def adapt_prompt(prompt: str, strict: bool = False) -> str:
     return prompt
 
 
-SYSTEM_PROMPT = adapt_prompt(_CLAUDE_PROMPT, strict=True)
+SYSTEM_PROMPT = adapt_prompt(_CLAUDE_PROMPT)  # tests check every edit still applies
 
 DEFAULT_GOAL = "Play Slay the Spire 2 and win the run."
 

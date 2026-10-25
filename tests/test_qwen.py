@@ -337,3 +337,9 @@ def test_http_error_raises(server, frame):
     _Stub.status = 400
     with pytest.raises(RuntimeError, match="HTTP 400"):
         QwenModel(QwenConfig(base_url=server)).decide(Observation(1, frame, []))
+
+
+def test_every_prompt_edit_applies_to_the_spire_prompt():
+    from sts_cua.models.claude import SYSTEM_PROMPT as claude_prompt
+
+    adapt_prompt(claude_prompt, strict=True)  # raises if claude.py's wording drifted
