@@ -593,6 +593,82 @@
     $("runs-more").hidden = runsCache.length < runsLimit;
   }
 
+  // Evals: memory A/B experiments (sts_cua.eval)
+
+  let evalOpen = null;
+  const fixed = (v, digits) => (isNum(v) ? v.toFixed(digits) : "-");
+  const pText = (v) => (isNum(v) ? (v < 0.001 ? "<0.001" : v.toFixed(3)) : "-");
+
+  async function loadEvals() {
+    try {
+      const data = await api("/api/evals");
+      const list = data.evals || [];
+      const td = (label, content, cls) => h("td", { "data-label": label, class: cls || null }, content);
+      $("evals-table").querySelector("tbody").replaceChildren(...list.map((e) => {
+        const open = () => openEval(e.name);
+        return h("tr", {
+          class: "clickable" + (e.name === evalOpen ? " selected" : ""), tabindex: 0, "data-eval": e.name,
+          onclick: open, onkeydown: (ev) => { if (ev.key === "Enter") open(); },
+        },
+          td("Name", e.name),
+          td("Mode", dash(e.mode)),
+          td("Comparison", (e.arms || []).slice().reverse().join(" vs ")),
+          td("Runs", `${dash(e.valid_runs)}/${dash(e.planned_runs)}`, "n"),
+          td("Cost", money(e.cost_usd), "n"),
+          td("p", pText(e.p_value), "n"),
+          td("Status", e.complete ? "complete" : dash(e.stop_reason || "not started")));
+      }));
+      $("evals-empty").hidden = list.length > 0;
+      if (evalOpen && !list.some((e) => e.name === evalOpen)) { evalOpen = null; $("eval-detail").hidden = true; }
+    } catch (e) {
+      report(e);
+    }
+  }
+
+  async function openEval(name) {
+    evalOpen = name;
+    for (const row of $("evals-table").querySelectorAll("tbody tr")) row.classList.toggle("selected", row.dataset.eval === name);
+    const box = $("eval-detail");
+    box.hidden = false;
+    box.replaceChildren(h("p", { class: "muted", text: "Loading..." }));
+    try {
+      const data = await api(`/api/evals/${encodeURIComponent(name)}`);
+      if (evalOpen !== name) return;
+      const r = data.report;
+      const td = (label, content, cls) => h("td", { "data-label": label, class: cls || null, text: content });
+      const arms = r.arms.map((label) => r.per_arm[label]);
+      const t = r.test;
+      const testLine = t
+        ? `${t.test === "wilcoxon_signed_rank" ? "Wilcoxon signed-rank" : "Mann-Whitney U"} (${t.method}): ` +
+          `p = ${pText(t.p_value)}, rank-biserial r = ${fixed(t.effect_size, 2)}, ` +
+          `mean difference ${fixed(t.mean_difference, 2)}, median difference ${fixed(t.median_difference, 2)}` +
+          (t.pairs != null ? `, ${t.pairs} pairs` : `, ${t.n} runs`)
+        : "No test yet: needs runs in both arms" + (r.mode === "paired" ? " on the same seed." : ".");
+      const w = r.win_rate_test;
+      box.replaceChildren(
+        h("h3", { text: `${r.name}: ${r.comparison}` }),
+        h("p", { class: "muted small", text: `${r.mode}, ${dash(r.character)}, A${dash(r.ascension)}, ` +
+          `${r.valid_runs}/${r.planned_runs} valid runs, ${money(r.cost_usd)}` + (r.stop_reason ? `, last stop: ${r.stop_reason}` : "") }),
+        h("table", { class: "cards" },
+          h("thead", null, h("tr", null, ["Arm", "Runs", "Mean score", "Median", "Win rate", "Mean floor", "Cost"].map(
+            (x, i) => h("th", { class: i ? "n" : null, text: x })))),
+          h("tbody", null, arms.map((a) => h("tr", { "data-arm": a.arm },
+            td("Arm", a.arm), td("Runs", `${a.runs}` + (a.invalid_runs ? ` (+${a.invalid_runs} invalid)` : ""), "n"),
+            td("Mean score", fixed(a.mean_score, 1), "n"), td("Median", fixed(a.median_score, 1), "n"),
+            td("Win rate", isNum(a.win_rate) ? `${(a.win_rate * 100).toFixed(0)}% (${a.wins})` : "-", "n"),
+            td("Mean floor", fixed(a.mean_floor, 1), "n"), td("Cost", money(a.cost_usd), "n"))))),
+        h("p", { class: "eval-test", text: testLine }),
+        w ? h("p", { class: "muted small", text: `Win rate: ${w.test === "fisher_exact" ? "Fisher exact" : "exact McNemar"} p = ${pText(w.p_value)}` }) : null,
+        h("ul", { class: "small" }, [...(r.notes || []), ...(r.warnings || [])].map((n) => h("li", { text: n }))),
+      );
+    } catch (e) {
+      report(e);
+      box.replaceChildren(h("p", { class: "error", text: e.message }));
+    }
+  }
+
+  $("evals-refresh").addEventListener("click", loadEvals);
+
   $("show-reset").addEventListener("change", renderRuns);
   $("runs-refresh").addEventListener("click", loadRuns);
   $("runs-more").addEventListener("click", () => { runsLimit += 50; loadRuns(); });
@@ -606,6 +682,7 @@
     $("replay").hidden = true;
     $("results-list").hidden = false;
     loadRuns();
+    loadEvals();
   }
 
   function kvList(obj, skip = []) {
