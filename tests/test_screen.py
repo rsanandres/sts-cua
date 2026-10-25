@@ -10,23 +10,24 @@ from sts_cua.screen import xdotool_args
 
 
 def test_click_args():
-    assert xdotool_args(Click(10, 20)) == ["mousemove", "--sync", "10", "20", "click", "--repeat", "1", "1"]
+    assert xdotool_args(Click(10, 20)) == ["mousemove", "--sync", "10", "20", "sleep", "0.25", "click", "--repeat", "1", "1"]
     assert xdotool_args(Click(1, 2, button="right", count=2)) == [
-        "mousemove", "--sync", "1", "2", "click", "--repeat", "2", "3",
+        "mousemove", "--sync", "1", "2", "sleep", "0.25", "click", "--repeat", "2", "3",
     ]
 
 
 def test_click_with_modifiers_releases_in_reverse():
     args = xdotool_args(Click(5, 5, modifiers="ctrl+shift"))
     assert args == [
-        "mousemove", "--sync", "5", "5", "keydown", "ctrl", "keydown", "shift",
+        "mousemove", "--sync", "5", "5", "sleep", "0.25", "keydown", "ctrl", "keydown", "shift",
         "click", "--repeat", "1", "1", "keyup", "shift", "keyup", "ctrl",
     ]
 
 
 def test_other_args():
     assert xdotool_args(Drag(1, 2, 3, 4)) == [
-        "mousemove", "--sync", "1", "2", "mousedown", "1", "mousemove", "--sync", "3", "4", "mouseup", "1",
+        "mousemove", "--sync", "1", "2", "sleep", "0.25", "mousedown", "1",
+        "mousemove", "--sync", "3", "4", "sleep", "0.25", "mouseup", "1",
     ]
     assert xdotool_args(MouseMove(7, 8)) == ["mousemove", "--sync", "7", "8"]
     assert xdotool_args(Scroll("down", 3)) == ["click", "--repeat", "3", "5"]

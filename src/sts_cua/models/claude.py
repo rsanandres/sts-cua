@@ -40,6 +40,14 @@ Keyboard shortcuts (use the key action; key names are lowercase):
 - m: open or close the map
 - a / s / d / x: draw pile / discard pile / deck / exhaust pile
 
+Combat:
+- Pressing a card's number selects it; pressing the same number again deselects it. Press it once.
+- A selected card is drawn large in the middle of the screen. While a card is selected, finish playing it before doing anything else.
+- Attacks that target an enemy: select the card, then click the enemy's body.
+- Cards that don't target an enemy still need confirming after you select them.
+- Hand numbers shift left to right after every card you play, so read them again from each new screenshot.
+- End your turn with e only when no card is selected.
+
 Prefer a shortcut when one fits; click for everything else. If the screen is still animating or loading, use wait instead of acting.
 
 When the goal is complete, don't take any action: reply with the word DONE and one line saying what you see."""

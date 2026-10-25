@@ -12,6 +12,9 @@ from PIL import Image
 from .actions import Action, Click, Drag, Key, MouseMove, Scroll, TypeText, Wait
 
 _BUTTONS = {"left": "1", "middle": "2", "right": "3"}
+# Spire 2 (Godot) only registers a click on a target the pointer is already hovering;
+# a click that arrives together with the move is ignored. Pause after moving.
+HOVER_SECONDS = "0.25"
 _SCROLL_BUTTONS = {"up": "4", "down": "5", "left": "6", "right": "7"}
 
 
@@ -26,7 +29,7 @@ class Screen(Protocol):
 def xdotool_args(action: Action) -> list[str] | None:
     """The xdotool arguments for an action, or None if it needs no input (wait)."""
     if isinstance(action, Click):
-        args = ["mousemove", "--sync", str(action.x), str(action.y)]
+        args = ["mousemove", "--sync", str(action.x), str(action.y), "sleep", HOVER_SECONDS]
         mods = action.modifiers.split("+") if action.modifiers else []
         for mod in mods:
             args += ["keydown", mod]
@@ -36,8 +39,8 @@ def xdotool_args(action: Action) -> list[str] | None:
         return args
     if isinstance(action, Drag):
         return [
-            "mousemove", "--sync", str(action.x0), str(action.y0), "mousedown", "1",
-            "mousemove", "--sync", str(action.x1), str(action.y1), "mouseup", "1",
+            "mousemove", "--sync", str(action.x0), str(action.y0), "sleep", HOVER_SECONDS, "mousedown", "1",
+            "mousemove", "--sync", str(action.x1), str(action.y1), "sleep", HOVER_SECONDS, "mouseup", "1",
         ]
     if isinstance(action, MouseMove):
         return ["mousemove", "--sync", str(action.x), str(action.y)]

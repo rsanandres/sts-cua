@@ -60,19 +60,42 @@ Act 1 is "Overgrowth". The top bar shows HP, gold, 3 potion slots, floor number,
 
 ## Combat (most steps happen here)
 
+Seen in run 20261025T090109Z (Haiku vs Nibbit, first fight of Act 1).
+
+### Layout (1280x720)
+
+| Element | Where | Notes |
+|---|---|---|
+| Hand | fan along the bottom, card centres y≈640–660; 5 cards at x≈390, 515, 640, 760, 880 | |
+| Card numbers | above each card, y≈555–595 | renumber left to right after every play |
+| Energy | red orb bottom-left ≈(108,593), "3/3" | |
+| Player | body ≈(320,400), HP bar ≈(320,503) | |
+| Enemy (one) | body ≈(950,450), HP ≈(960,503), name below | |
+| Enemy intent | above the enemy ≈(950,378): sword + damage, shield when blocking | always on screen, no hover needed |
+| End Turn button | ≈(1142,595), "End Turn N" | |
+| Draw pile / discard pile | ≈(35,685) / ≈(1245,685), with count badges | |
+| Potion slots | top bar ≈(355,25), (395,25), (437,25) | |
+| Top bar | HP ≈(150,25), gold ≈(250,25), floor ≈(550,25), map ≈(1135,25), deck ≈(1190,25), settings ≈(1242,25) | "Game Saved" toast ≈(1030,25) |
+
+### Inputs
+
 | Input | Effect | Kind | Status |
 |---|---|---|---|
-| `1`-`9`, `0` | Select the card in that hand position (number shown above the card when "Show Hand Card Count" is on) | Commit, part 1 | confirmed (keybind and setting) |
-| Click an enemy after selecting a targeted card | Play it on that enemy | Commit | unverified |
-| Click empty play area, or select again | Play an untargeted card | Commit | unverified |
-| `Down` | Release the selected card back to hand | Undo selection | confirmed (keybind) |
-| `e` | End turn | Commit | confirmed (keybind "confirm"; verify it ends the turn in combat) |
-| Hover an enemy | Intent (attack value, buff, debuff) and powers | Inspect | unverified; the intent icon may already show on screen |
-| `a` | Draw pile: what's left to draw | Inspect | confirmed (keybind); whether it shows draw order is unverified |
-| `s` | Discard pile | Inspect | confirmed (keybind) |
-| `x` | Exhaust pile | Inspect | confirmed (keybind) |
-| `Space` | Peek (keybind name; likely shows the board without the hand) | Inspect | confirmed (keybind); effect unverified |
-| Click a potion slot, then Use / Discard, then a target | Use or drop a potion | Commit | unverified |
+| `1`-`9`, `0` | Select the card in that slot. **Pressing the same number again deselects it.** | Commit, part 1 | confirmed |
+| Click the enemy body with a targeted card selected | Play it on that enemy | Commit | confirmed, **only if the pointer was already hovering the enemy**. The harness now moves, waits 0.25 s, then clicks |
+| Confirm a non-targeted card (Defend) | Play it | Commit | **untested**: `e`, `Enter`, or a click on the player |
+| `e` with no card selected | End turn | Commit | confirmed |
+| `e` with a card selected | Probably confirms the card (`ui_accept`) | Commit | untested |
+| Hover the enemy | Tooltip, e.g. "Aggressive: This enemy intends to Attack for 12 damage" ≈(745,433) | Inspect | confirmed |
+| `Down` | Release the selected card back to hand | Undo selection | keybind confirmed, effect untested |
+| `a` / `s` / `x` | Draw / discard / exhaust pile | Inspect | keybinds confirmed, views not yet seen |
+| `Space` | Peek | Inspect | keybind confirmed, effect not yet seen |
+| Potion slot, then Use / Discard, then target | Use or drop a potion | Commit | not yet seen |
+
+### Known failure modes (first fight)
+
+- Pressing a card number three times to "play three cards": the presses toggle one card on and off.
+- Missing the selected-card state: a selected card is drawn large mid-screen and can cover the enemy, which the model read as "the enemy is gone".
 
 ## Rewards (after combat)
 
