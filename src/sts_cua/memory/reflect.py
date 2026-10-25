@@ -282,7 +282,7 @@ def reflect(store: NoteStore, run: Run, client=None, model: str = DEFAULT_MODEL)
             "cache_creation_input_tokens": usage.cache_creation_input_tokens,
         },
         "cost_usd": usage.cost_usd,
-        "scored": "skipped" not in score,
+        "scored": score.get("skipped") in (None, "already scored"),
     }
     text = next((b.text for b in response.content if b.type == "text"), "")
     try:

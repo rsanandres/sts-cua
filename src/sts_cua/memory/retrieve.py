@@ -181,3 +181,11 @@ class Retriever:
         if situational:
             lines += ["For this screen:"] + [f"- {n.text}" for n in situational]
         return "\n".join(lines), [n.id for n in playbook + situational]
+
+
+def for_run(path, game_build: str = "unknown", seed: int | None = None) -> tuple[Retriever, dict]:
+    """A Retriever over the store at path with a fresh probation seed, and the run's meta.json["memory"] record."""
+    game_version = None if game_build == "unknown" else game_build
+    seed = random.randrange(2**31) if seed is None else seed
+    retriever = Retriever(NoteStore.load(path), seed=seed, game_version=game_version)
+    return retriever, {"path": str(path), "seed": seed, "game_version": game_version, "notes": len(retriever.notes)}

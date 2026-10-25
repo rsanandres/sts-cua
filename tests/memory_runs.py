@@ -3,6 +3,8 @@
 import json
 from pathlib import Path
 
+from anthropic.types import Message
+
 CLICK = {"kind": "click", "x": 640, "y": 300, "button": "left", "count": 1, "modifiers": None}
 
 
@@ -52,3 +54,21 @@ def write_run(root, name, steps, meta=None, summary=None) -> Path:
         lines.append(json.dumps({"step": number, "screenshot": f"screenshots/step_{number:04d}.png", **record}))
     (run_dir / "steps.jsonl").write_text("\n".join(lines) + "\n")
     return run_dir
+
+
+class FakeClient:
+    """Stands in for anthropic.Anthropic(): every messages.create returns {"ops": ops}."""
+
+    def __init__(self, ops):
+        self.requests = []
+        self.messages = self
+        self.reply = Message.model_validate({
+            "id": "msg_reflect", "type": "message", "role": "assistant", "model": "claude-sonnet-5-5",
+            "content": [{"type": "text", "text": json.dumps({"ops": ops})}],
+            "stop_reason": "end_turn", "stop_sequence": None,
+            "usage": {"input_tokens": 3000, "output_tokens": 400, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0},
+        })
+
+    def create(self, **kwargs):
+        self.requests.append(kwargs)
+        return self.reply

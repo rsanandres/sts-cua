@@ -7,8 +7,13 @@ short reset run (its own run dir, meta kind "reset") asks the model to get there
 game run stops when the mod state shows the run is over (score.RunOverDetector), then
 gets a score.json and one line in runs/ledger.jsonl.
 
+With --memory, each game run sees matching notes from the store (a fresh probation seed
+per run, in meta.json["memory"]); after it, the run is scored against the store and one
+reflect call (sts_cua.memory.reflect) edits it. Reset runs get no notes and no reflect.
+
 The daily budget is the sum of cost_usd in runs/*/summary.json whose ended_at falls on
-today's date in America/Los_Angeles, so reset runs and runs from earlier sessions count.
+today's date in America/Los_Angeles, plus the cost_usd of runs/*/memory_reflect.json by
+its time, so reset runs, reflect calls and runs from earlier sessions count.
 """
 
 from __future__ import annotations
@@ -16,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
+import traceback
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -23,6 +29,11 @@ from typing import Callable
 from zoneinfo import ZoneInfo
 
 from .loop import LoopConfig, run
+from .memory.reflect import REFLECT_FILE, reflect
+from .memory.retrieve import for_run
+from .memory.runs import load_run
+from .memory.score import score_run as score_notes
+from .memory.store import NoteStore, now
 from .models.base import Model
 from .models.factory import add_model_args
 from .runlog import RunLog
@@ -30,6 +41,7 @@ from .score import RunOverDetector, at_main_menu, load_states, score_run
 from .screen import Screen
 
 BUDGET_TZ = "America/Los_Angeles"
+MEMORY_ERROR_FILE = "memory_error.json"
 
 GAME_GOAL = (
     "Start a new singleplayer run from the main menu and play it to the end. "
@@ -63,6 +75,9 @@ class SupervisorConfig:
     game_build: str = "unknown"
     timezone: str = BUDGET_TZ
     meta: dict = field(default_factory=dict)  # extra fields for every run's meta.json
+    memory_path: Path | None = None  # note store; None: no memory
+    reflect: bool = True  # with memory: one reflect call after each game run
+    reflect_reserve_usd: float = 0.05  # expected reflect cost: kept out of a run's cap, and needed to reflect
 
 
 @dataclass
@@ -72,19 +87,24 @@ class Session:
 
 
 def spent_on(runs_dir: str | Path, day: date, tz: str = BUDGET_TZ) -> float:
-    """API cost of runs in runs_dir that ended on `day` in time zone tz."""
+    """API cost in runs_dir on `day` in time zone tz: runs by the time they ended, reflect calls by their time.
+
+    summary.json holds only the run's own model calls and memory_reflect.json only the reflect call,
+    so each dollar is counted once.
+    """
     zone = ZoneInfo(tz)
     total = 0.0
-    for path in Path(runs_dir).glob("*/summary.json"):
-        try:
-            summary = json.loads(path.read_text(encoding="utf-8"))
-            ended = datetime.fromisoformat(summary["ended_at"])
-        except (OSError, ValueError, KeyError, TypeError):
-            continue
-        if ended.tzinfo is None:
-            ended = ended.replace(tzinfo=timezone.utc)  # RunLog writes UTC
-        if ended.astimezone(zone).date() == day:
-            total += float(summary.get("cost_usd") or 0.0)
+    for name, stamp in (("summary.json", "ended_at"), (REFLECT_FILE, "time")):
+        for path in Path(runs_dir).glob(f"*/{name}"):
+            try:
+                record = json.loads(path.read_text(encoding="utf-8"))
+                at = datetime.fromisoformat(record[stamp])
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+            if at.tzinfo is None:
+                at = at.replace(tzinfo=timezone.utc)  # RunLog and the note store write UTC
+            if at.astimezone(zone).date() == day:
+                total += float(record.get("cost_usd") or 0.0)
     return total
 
 
@@ -104,10 +124,12 @@ def supervise(
     clock: Callable[[], datetime] = _utc_now,
     sleep: Callable[[float], None] = time.sleep,
     echo: Callable[[str], None] = print,
+    reflect_client_factory: Callable[[], object] | None = None,
 ) -> Session:
     """Run games until the budget, the run limit, or a problem stops the session.
 
     model_factory(goal) builds a model for one run; state_fn returns the summarized mod state.
+    reflect_client_factory() builds the Anthropic client for a reflect call (default: anthropic.Anthropic()).
     """
     runs_dir = Path(config.runs_dir)
     runs_dir.mkdir(parents=True, exist_ok=True)
@@ -126,6 +148,8 @@ def supervise(
                 sleep(config.state_retry_seconds)
         return None
 
+    reflecting = config.memory_path is not None and config.reflect
+
     def loop_config(max_steps: int, budget_left: float) -> LoopConfig:
         cap = budget_left if config.max_cost_per_run is None else min(config.max_cost_per_run, budget_left)
         return LoopConfig(
@@ -138,6 +162,37 @@ def supervise(
             **config.meta, "kind": kind, "model": model.name, "goal": goal, "screen_size": list(screen.size),
             "game_build": config.game_build,
         }
+
+    def learn(run_dir: Path) -> dict:
+        """Score the run against the store, then reflect if wanted and affordable. Never raises."""
+        out = {"notes_added": None, "notes_changed": None, "reflect_cost_usd": None}
+        stage = "score"
+        try:
+            store, finished = NoteStore.load(config.memory_path), load_run(run_dir)
+            score_notes(store, finished)
+            store.save()
+            if not config.reflect:
+                return out
+            if remaining() < config.reflect_reserve_usd:
+                echo(f"skipping reflect for {run_dir.name}: under ${config.reflect_reserve_usd:.2f} left today")
+                return out
+            stage = "reflect"
+            client = reflect_client_factory() if reflect_client_factory else None
+            record = reflect(store, finished, client=client)
+            results = [r.get("result", "") for r in record.get("results", [])]
+            out.update(
+                notes_added=sum(r == "added" for r in results),
+                notes_changed=sum(r.startswith(("updated", "downvoted", "retired")) for r in results),
+                reflect_cost_usd=record.get("cost_usd"),
+            )
+            if record.get("error"):
+                echo(f"reflect for {run_dir.name}: {record['error']}")
+        except Exception as exc:  # memory must never stop the session
+            echo(f"memory {stage} failed for {run_dir.name}: {exc!r}")
+            (run_dir / MEMORY_ERROR_FILE).write_text(json.dumps({
+                "stage": stage, "time": now(), "error": repr(exc), "traceback": traceback.format_exc(),
+            }, indent=2) + "\n", encoding="utf-8")
+        return out
 
     while True:
         if config.max_runs is not None and len(entries) >= config.max_runs:
@@ -159,11 +214,17 @@ def supervise(
             if remaining() < config.reserve_usd:
                 return Session(entries, "budget")
 
+        notes_fn, memory_meta = None, None
+        if config.memory_path is not None:
+            notes_fn, memory_meta = for_run(config.memory_path, config.game_build)
         model, screen = model_factory(config.game_goal), screen_factory()
-        log = RunLog(runs_dir, meta=meta(model, "game", config.game_goal, screen))
+        log = RunLog(runs_dir, meta={
+            **meta(model, "game", config.game_goal, screen), **({"memory": memory_meta} if memory_meta else {}),
+        })
         started_at = json.loads((log.dir / "meta.json").read_text(encoding="utf-8"))["started_at"]
-        summary = run(model, screen, log, loop_config(config.max_steps, remaining()), state_fn=state_fn,
-                      stop_fn=RunOverDetector())
+        budget_left = remaining() - (config.reflect_reserve_usd if reflecting else 0.0)
+        summary = run(model, screen, log, loop_config(config.max_steps, budget_left), state_fn=state_fn,
+                      stop_fn=RunOverDetector(), notes_fn=notes_fn)
 
         result = score_run(load_states(log.dir))
         (log.dir / "score.json").write_text(json.dumps(result.to_dict(), indent=2) + "\n", encoding="utf-8")
@@ -173,7 +234,11 @@ def supervise(
             "end_reason": summary["end_reason"], "outcome": result.outcome, "floor": result.max_floor,
             "bosses_killed": result.bosses_killed, "score": result.score, "character": result.character,
             "ascension": result.ascension, "game_build": config.game_build,
+            "memory": str(config.memory_path) if config.memory_path is not None else None,
+            "notes_added": None, "notes_changed": None, "reflect_cost_usd": None,
         }
+        if config.memory_path is not None:
+            entry.update(learn(log.dir))
         with (runs_dir / "ledger.jsonl").open("a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
         entries.append(entry)
@@ -205,6 +270,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--runs-dir", default="runs")
     parser.add_argument("--game-build", default="unknown", help="Spire 2 build, recorded in each run log and the ledger")
     parser.add_argument("--state-url", default="http://localhost:15526/api/v1/singleplayer", help="STS2MCP game state endpoint")
+    parser.add_argument("--memory", metavar="PATH",
+                        help="note store, e.g. memory/notes.jsonl: show matching notes in game runs, then score and reflect")
+    parser.add_argument("--no-reflect", action="store_true", help="with --memory: score runs but make no reflect call")
+    parser.add_argument("--reflect-reserve", type=float, default=0.05,
+                        help="expected USD per reflect call: kept back from each game run, and skip reflect with less left today")
     add_model_args(parser)  # --model, --goal (default: GAME_GOAL), --prompt-file, ...
     args = parser.parse_args(argv)
 
@@ -217,6 +287,8 @@ def main(argv: list[str] | None = None) -> None:
         max_idle_steps=args.max_idle_steps, reset_max_steps=args.reset_max_steps, settle_seconds=args.settle,
         game_goal=args.goal or GAME_GOAL, game_build=args.game_build,
         meta={"display": args.display, "prompt_file": args.prompt_file, "send_width": args.send_width},
+        memory_path=Path(args.memory) if args.memory else None, reflect=not args.no_reflect,
+        reflect_reserve_usd=args.reflect_reserve,
     )
     session = supervise(
         config,

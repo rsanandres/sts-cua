@@ -36,14 +36,9 @@ def main(argv: list[str] | None = None) -> None:
 
     notes_fn, memory_meta = None, None
     if args.memory:
-        import random
+        from .memory.retrieve import for_run
 
-        from .memory import NoteStore, Retriever
-
-        game_version = None if args.game_build == "unknown" else args.game_build
-        notes_fn = Retriever(NoteStore.load(args.memory), seed=random.randrange(2**31), game_version=game_version)
-        memory_meta = {"path": args.memory, "seed": notes_fn.seed, "game_version": game_version,
-                       "notes": len(notes_fn.notes)}
+        notes_fn, memory_meta = for_run(args.memory, args.game_build)
 
     log = RunLog(args.runs_dir, meta={
         "model": model.name,
