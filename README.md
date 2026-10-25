@@ -125,6 +125,23 @@ Code map:
 - `src/sts_cua/screen.py`: `X11Screen` (mss capture, xdotool input) and `FakeScreen` for tests.
 - `src/sts_cua/runlog.py`, `src/sts_cua/pricing.py`: run logs and per-step cost.
 
+## Run Slay the Spire 2
+
+Requires Steam for Linux running and logged in inside WSL, Spire 2 installed, and the agent's save profile selected (Profile 3 on Raph's machine).
+
+```
+tools/launch_sts2.sh /tmp/sts2.log      # Xvfb :99 + game on the GPU + layout fix, waits for the main menu
+```
+
+`src/sts_cua/game.py` holds what we learned getting it running on WSL2:
+
+- Launch the binary directly (`SteamAppId`/`SteamGameId` set, Steam running). Through Steam's runtime container the game can't see WSL's GPU libraries and fails to create an OpenGL context.
+- `GALLIUM_DRIVER=d3d12 --rendering-driver opengl3` renders on the RTX 4090 (game log: `Using Device: Microsoft - D3D12 (NVIDIA GeForce RTX 4090)`).
+- The first frame lays out wrong until the window is resized by one pixel and back.
+- SIGTERM is ignored; `game.quit_game` clicks Quit then Yes.
+
+Game settings for agent runs (machine `settings.save` is not cloud-synced; profile prefs are, so change those in-game): 1280x720 windowed at 0,0, vsync off, 30 fps cap, MSAA off, all volumes 0, skip intro. Agent profile: fast mode, no screen shake, no text effects, hand card numbers shown, gameplay data upload off. Keyboard: `1`-`0` select cards, `E` confirm, `Enter` select, `M` map, `Escape` cancel.
+
 ## Status
 
 Harness and Claude adapter built and tested against a virtual display with a scripted model. Not yet run against the live API or the game.
