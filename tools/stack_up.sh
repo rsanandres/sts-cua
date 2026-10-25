@@ -8,14 +8,23 @@ export DISPLAY=:0  # Steam's own window goes to the Windows desktop (WSLg)
 
 log() { echo "[$(date +%H:%M:%S)] $*"; }
 
+CONN_LOG=~/.steam/debian-installation/logs/connection_log.txt
+# The log keeps earlier sessions' "Logged On" lines, so when we start Steam ourselves,
+# only count lines written after this point (from the top again if Steam rotates the log).
+SINCE=0
 if ! pgrep -x steam >/dev/null; then
+  SINCE=$(stat -c %s "$CONN_LOG" 2>/dev/null || echo 0)
   log "starting Steam (log in here the first time; tick 'remember me')"
   nohup setsid steam -cef-disable-gpu >/tmp/steam.log 2>&1 </dev/null &
 fi
 
 log "waiting for Steam to log in"
-CONN_LOG=~/.steam/debian-installation/logs/connection_log.txt
-logged_on() { pgrep -x steam >/dev/null && tail -n 40 "$CONN_LOG" 2>/dev/null | grep -q "Logged On"; }
+logged_on() {
+  pgrep -x steam >/dev/null || return 1
+  local size; size=$(stat -c %s "$CONN_LOG" 2>/dev/null || echo 0)
+  (( size < SINCE )) && SINCE=0
+  tail -c +$((SINCE + 1)) "$CONN_LOG" 2>/dev/null | tail -n 40 | grep -q "Logged On"
+}
 for _ in $(seq 1 180); do
   logged_on && break
   sleep 2
