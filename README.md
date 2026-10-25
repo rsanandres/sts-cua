@@ -94,6 +94,29 @@ How much does reasoning buy you in Spire, and on which decisions? Run the agents
 4. Local open model on the 4090 behind the same interface.
 5. Thinking-on vs thinking-off comparison on fixed seeds.
 
+## Run the harness
+
+Needs Python 3.11+, an X display (Xvfb in the game container), and `xdotool`.
+
+```
+uv venv && uv pip install -e ".[dev]"
+Xvfb :99 -screen 0 1280x720x24 &
+python -m sts_cua --display :99 --model scripted --max-steps 3      # dry run, no API calls
+python -m sts_cua --display :99 --model claude-haiku-5-5 --thinking off --max-steps 20 --max-cost 0.25
+python -m sts_cua --display :99 --model claude-sonnet-5-5 --thinking on --effort medium --max-steps 20
+pytest
+```
+
+Claude needs `ANTHROPIC_API_KEY` (or an `ant auth login` profile). Each run writes `runs/<timestamp>/` with `meta.json`, `steps.jsonl` (thought, reasoning summary, proposed and executed actions, tokens, cost per step), a screenshot per step, and `summary.json`. A run stops at `--max-steps`, at `--max-cost` USD, after 3 steps in a row with no action, or after 3 errors in a row.
+
+Code map:
+
+- `src/sts_cua/loop.py`: screenshot, decide, act, log.
+- `src/sts_cua/models/base.py`: the `Model.decide(Observation) -> Decision` interface every adapter implements.
+- `src/sts_cua/models/claude.py`: Claude adapter on the `computer_toolset_20260801` tool. Each step is a fresh request (cached system prompt and tools, a text log of recent steps, the current screenshot), so nothing is replayed and cost per step stays flat.
+- `src/sts_cua/screen.py`: `X11Screen` (mss capture, xdotool input) and `FakeScreen` for tests.
+- `src/sts_cua/runlog.py`, `src/sts_cua/pricing.py`: run logs and per-step cost.
+
 ## Status
 
-Plan done. Harness in progress.
+Harness and Claude adapter built and tested against a virtual display with a scripted model. Not yet run against the live API or the game.
