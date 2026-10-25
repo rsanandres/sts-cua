@@ -96,7 +96,7 @@ Make footage from any run with `python -m sts_cua.replay runs/<run>` (see the RE
 - It started on the Timeline screen left by the last death. It revealed the waiting Epoch, which unlocked the Silent, then went back to the menu.
 - The game now preselects the Silent, so "default character" meant the Silent. Goals should name the character from now on.
 - At the opening Ancient event it took Lead Paperweight, avoiding a curse, then Thrumming Hatchet.
-- On the map it clicked the bottom node twice, but after an opening event that node is a cave and already done. Then it picked the node above it. The prompt is fixed to cover this (PR #21).
+- On the map it clicked the bottom node twice, but after an opening event that node is a cave and already done. Then it picked the node above it. The prompt is fixed to cover this (PR #23).
 - Three fights, 7 HP lost in total:
   - Slimes: 0 HP lost. Took Noxious Fumes.
   - Nibbit: 2 HP lost. Took Deflect and a Flex Potion.
