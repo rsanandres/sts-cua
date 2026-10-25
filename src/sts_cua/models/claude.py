@@ -27,11 +27,19 @@ MAX_VISUAL_TOKENS = 4784
 
 SYSTEM_PROMPT = """You are playing Slay the Spire 2 by looking at the screen and using the mouse and keyboard.
 
-Each turn you get one screenshot of the game as it is right now, plus a short log of your recent steps. Take the next action toward winning the run. After your actions run, the next screenshot arrives automatically, so never ask for one.
+Each turn you get one screenshot of the game as it is right now, plus a short log of your recent steps. Take the next action toward the goal you are given, or toward winning the run if none is given. After your actions run, the next screenshot arrives automatically, so never ask for one.
 
 Coordinates are pixels in the screenshot you were given, origin at the top left.
 
-If the screen is still animating or loading, use wait instead of clicking."""
+Keyboard shortcuts (use the key action; key names are lowercase):
+- 1 to 9, then 0: select the card in that hand position (the number is shown above each card)
+- e: confirm (for example end turn or confirm a choice)
+- Return: select the highlighted menu item
+- Escape: cancel or back
+- m: open or close the map
+- a / s / d / x: draw pile / discard pile / deck / exhaust pile
+
+Prefer a shortcut when one fits; click for everything else. If the screen is still animating or loading, use wait instead of acting."""
 
 _THOUGHT_INSTRUCTION = "Before acting, write one or two short sentences saying what you see and why you are taking this action."
 _NO_THOUGHT_INSTRUCTION = "Reply with the action only, no explanation."
@@ -53,6 +61,7 @@ class ClaudeConfig:
     system_prompt: str = SYSTEM_PROMPT
     # Shrink screenshots to this width before sending (fewer image tokens). None sends full size.
     send_width: int | None = None
+    goal: str | None = None
 
 
 def thinking_params(model: str, thinking: str, effort: str) -> dict:
@@ -115,6 +124,7 @@ class ClaudeModel:
         else:
             history_text = "This is the first step."
 
+        goal_text = f"Goal: {self.config.goal}\n\n" if self.config.goal else ""
         request = {
             "model": self.config.model,
             "max_tokens": self.config.max_tokens or (16000 if self.config.thinking == "on" else 2048),
@@ -127,7 +137,7 @@ class ClaudeModel:
                 "role": "user",
                 "content": [
                     {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": _png_base64(image)}},
-                    {"type": "text", "text": f"Step {obs.step}. Screenshot is {image.width}x{image.height}.\n\n{history_text}\n\n{instruction}"},
+                    {"type": "text", "text": f"{goal_text}Step {obs.step}. Screenshot is {image.width}x{image.height}.\n\n{history_text}\n\n{instruction}"},
                 ],
             }],
             **self._thinking,

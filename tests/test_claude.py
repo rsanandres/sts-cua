@@ -142,3 +142,13 @@ def test_send_width_shrinks_and_maps_back(frame):
     decision = model.decide(Observation(1, frame, []))
     assert "Screenshot is 960x540" in client.requests[0]["messages"][0]["content"][1]["text"]
     assert decision.actions == [Click(640, 360)]
+
+
+def test_goal_and_shortcuts_reach_the_model(frame):
+    client = FakeClient(message([tool("key", {"text": "1"})]))
+    model = ClaudeModel(ClaudeConfig(goal="Start a singleplayer run"), client=client)
+    decision = model.decide(Observation(1, frame, []))
+    req = client.requests[0]
+    assert req["messages"][0]["content"][1]["text"].startswith("Goal: Start a singleplayer run")
+    assert "1 to 9, then 0" in req["system"][0]["text"]
+    assert decision.actions == [Key("1")]
