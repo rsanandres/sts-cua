@@ -154,6 +154,22 @@ Copy `STS2_MCP.dll` + `STS2_MCP.json` into `<game>/mods/` and accept the "Load M
 
 The harness only reads `GET /api/v1/singleplayer` (`src/sts_cua/state.py`) and logs a summary per step as ground truth (screen type, floor, HP, energy, hand, enemies and intents). The agent never sees it; it stays pixel-only. Never call the mod's POST endpoints from the harness.
 
+## Play runs back to back
+
+Needs the game on the main menu (`tools/launch_sts2.sh`) and the STS2MCP mod, which the supervisor reads to tell when a run is over.
+
+```
+python -m sts_cua.supervisor --display :99 --model scripted --max-runs 1 --max-steps 5   # dry run, no API calls
+python -m sts_cua.supervisor --display :99 --model claude-haiku-5-5 --thinking off --daily-budget 2.00 --game-build v0.107.1
+```
+
+Each game run starts a new singleplayer run from the main menu and plays it to the end. A run stops when the mod shows the game-over screen or a menu after the run started, or at the usual caps (`--max-steps` 3000, `--max-cost` per run, default whatever is left of today's budget, 10 idle steps in a row). Then the supervisor writes `score.json` into the run dir: outcome (won, died, abandoned, unknown), max floor, bosses killed, and a per-combat breakdown. It also appends one line to `runs/ledger.jsonl`. Score is 100 for a win, otherwise floor + 52/3 per boss killed (AgenticSTS's score).
+
+If the game isn't on the main menu with no saved run before a run, a short reset run (meta `kind: "reset"`, no score) asks the model to get it there. The daily budget is the sum of `cost_usd` in `runs/*/summary.json` that ended today in America/Los_Angeles, reset runs and earlier sessions included. The supervisor stops when less than `--reserve` ($0.10) is left, after `--max-runs`, when the mod can't be reached, when the reset fails, or after 3 runs in a row that never got into a run.
+
+- `src/sts_cua/supervisor.py`: the session loop and budget accounting.
+- `src/sts_cua/score.py`: outcome, score and per-combat breakdown from a run's logged states (`load_states(run_dir)`), and the stop check (`RunOverDetector`).
+
 ## Status
 
-Harness runs Spire 2 end to end on Raph's PC. Haiku 5.5 won the first fight of Act 1 (14 steps, $0.0056, run 20261025T164617Z). Next: the supervisor for back-to-back full runs.
+Harness runs Spire 2 end to end on Raph's PC. Haiku 5.5 won the first fight of Act 1 (14 steps, $0.0056, run 20261025T164617Z). The supervisor for back-to-back full runs (`python -m sts_cua.supervisor`) is written and tested on fakes only; it has not run against the game yet.
