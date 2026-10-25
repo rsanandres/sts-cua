@@ -70,7 +70,7 @@ def test_reflect_applies_delta_ops_and_logs_cost(tmp_path):
     assert req["model"] == "claude-sonnet-5-5"
     assert req["output_config"]["format"] == {"type": "json_schema", "schema": OPS_SCHEMA}
     digest = req["messages"][0]["content"]
-    assert "| 1 | 1 | 1 | Nibbit | 80 | 62 | 18 | won | 3 |" in digest
+    assert "| 1 | 1 | 1 | monster | Nibbit | 80 | 62 | 18 | won | 3 |" in digest
     assert "step 1 [map] error" in digest and "legend looks clickable" in digest
     assert "Nibbit intends 12" in digest
     assert "n0001 [enemy; enemy=Nibbit; probation; shown on 3 steps" in digest
@@ -142,3 +142,11 @@ def test_dry_run_request_has_no_side_effects(tmp_path):
     request = build_request(store, run)
     assert "Combats" in request["messages"][0]["content"]
     assert not (run.dir / "memory_reflect.json").exists()
+
+
+def test_reset_runs_are_skipped(tmp_path):
+    store, _ = setup(tmp_path)
+    reset = load_run(write_run(tmp_path, "reset1", fight("Nibbit", 1, 80, 5, shown=["n0001"]), meta={"kind": "reset"}))
+    client = FakeClient(OPS)
+    assert reflect(store, reset, client=client)["skipped"] == "reset run"
+    assert client.requests == [] and not (reset.dir / "memory_score.json").exists()

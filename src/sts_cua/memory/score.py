@@ -1,7 +1,7 @@
 """Update note utilities from one run's dense outcomes, then promote or retire notes.
 
 Units and losses (lower is better, both in 0..1):
-- enemy, card, strategy notes: each finished combat in which the note applied on at
+- enemy, card, strategy notes: each won or lost combat (sts_cua.score.combats) in which the note applied on at
   least one step. Loss = HP lost in that combat / max HP at its start.
 - ui, pitfall, event notes: each visit to a screen the note applied to (a stretch of
   consecutive steps where it applied). Loss = share of the visit's steps that were
@@ -16,8 +16,8 @@ can't produce a tight interval.
 
 Gate: once a note has MIN_SHOWN shown and MIN_HIDDEN hidden units, a probation note
 becomes active when lo > 0, and any note is retired when hi < 0.
-Only notes created before the run started are scored, and a run is scored once
-(memory_score.json in the run directory marks it).
+Only notes created before the run started are scored, a run is scored once
+(memory_score.json in the run directory marks it), and reset runs are skipped.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ import math
 from datetime import datetime
 
 from .retrieve import context_from_state, matches
-from .runs import Run, combats, wasted_steps
+from .runs import Run, fights, wasted_steps
 from .store import Group, Note, NoteStore, Utility, now
 
 Z = 1.64  # about a 90% two-sided interval
@@ -77,12 +77,12 @@ def observations(note: Note, run: Run, applies: dict[int, bool], wasted: dict[in
     shown_at = {s["step"] for s in run.steps if note.id in (s.get("notes_shown") or [])}
     out = []
     if note.kind in COMBAT_KINDS:
-        for combat in combats(run.steps):
-            if combat.result == "unfinished" or not combat.max_hp or combat.hp_lost is None:
-                continue
-            if any(applies.get(n) for n in combat.steps):
-                arm = "shown" if shown_at.intersection(combat.steps) else "hidden"
-                out.append((arm, combat.hp_lost / combat.max_hp))
+        for fight in fights(run):
+            if fight.combat.result not in ("won", "lost") or not fight.max_hp or fight.hp_lost is None:
+                continue  # unfinished or abandoned fights say little about the note
+            if any(applies.get(n) for n in fight.steps):
+                arm = "shown" if shown_at.intersection(fight.steps) else "hidden"
+                out.append((arm, fight.hp_lost / fight.max_hp))
         return out
     visit: list[int] = []
     for step in run.steps + [None]:
@@ -101,6 +101,8 @@ def score_run(store: NoteStore, run: Run, force: bool = False) -> dict:
     marker = run.dir / SCORE_FILE
     if marker.exists() and not force:
         return {"skipped": "already scored", **json.loads(marker.read_text(encoding="utf-8"))}
+    if run.meta.get("kind") == "reset":
+        return {"skipped": "reset run"}
     if not run.used_memory:
         return {"skipped": "run did not use memory"}
 

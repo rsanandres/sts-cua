@@ -39,9 +39,13 @@ def run(
     log: RunLog,
     config: LoopConfig | None = None,
     state_fn: Callable[[], dict | None] | None = None,
+    stop_fn: Callable[[dict | None], str | None] | None = None,
     notes_fn: Callable[[dict | None], tuple[str, list[str]]] | None = None,
 ) -> dict:
     """state_fn, if given, returns the true game state each step. It is logged, never shown to the model.
+
+    stop_fn, if given, is called with each step's state before the model is asked; a string
+    return logs the step with no decision and ends the run with that string as end_reason.
 
     notes_fn, if given, maps that state to (notes text, note ids): lessons from earlier runs
     shown to the model this step (sts_cua.memory.Retriever). The ids are logged as notes_shown.
@@ -66,6 +70,11 @@ def run(
                 unchanged = 0
         previous = screenshot
         state = state_fn() if state_fn else None
+        reason = stop_fn(state) if stop_fn else None
+        if reason:
+            log.step(step, screenshot, None, [], state=state)
+            end_reason = reason
+            break
         notes, notes_shown = notes_fn(state) if notes_fn else ("", None)
         try:
             decision = model.decide(Observation(step, screenshot, history, notes=notes))

@@ -118,3 +118,11 @@ def test_main_memory_flag_wires_retriever(tmp_path, frame, monkeypatch, capsys):
     assert meta["memory"]["path"] == str(store.path) and isinstance(meta["memory"]["seed"], int)
     steps = [json.loads(line) for line in (run_dir / "steps.jsonl").read_text().splitlines()]
     assert [s["notes_shown"] for s in steps] == [["n0001"], ["n0001"]]
+
+
+def test_combat_alias_and_character_from_state():
+    ended = {"state_type": "elite", "act": 1, "floor": 3, "character": "The Silent", "combat_ended": True}
+    ctx = context_from_state(ended)
+    assert matches(Note(id="n1", kind="pitfall", text="t", keys={"screen": "combat"}), ctx)
+    assert matches(Note(id="n1", kind="strategy", text="t", keys={"character": "the silent"}), ctx)
+    assert not matches(Note(id="n1", kind="strategy", text="t", keys={"character": "The Ironclad"}), ctx)

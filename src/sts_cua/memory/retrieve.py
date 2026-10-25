@@ -2,13 +2,14 @@
 
 Key rule: a note's keys may only name things the agent can see on screen at that
 moment, so a note is never a side channel for hidden state:
-- screen: the screen type (the mod's state_type, e.g. map, monster, rewards, event;
-  "combat" matches any screen with enemies on it)
+- screen: the screen type (the mod's state_type, e.g. map, monster, elite, boss, rewards, event;
+  "combat" matches any combat screen)
 - enemy: an enemy name shown under the enemy
 - card: a card name in the hand
 - event: the event's title
 - act: the act number in the top bar
-- character, game_version: fixed for a run (the character picked; the pinned game build)
+- character, game_version: fixed for a run (the character shown in the top bar, from the
+  logged state when present; the pinned game build)
 The harness reads these from the logged game state only because it already names
 what is on screen; nothing else from the state (draw pile, intents' hidden numbers,
 seeds) may become a key.
@@ -31,6 +32,7 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, field
 
+from ..state import COMBAT_TYPES
 from .store import Note, NoteStore
 
 HEADER = (
@@ -74,13 +76,13 @@ def context_from_state(state: dict | None, character: str | None = None, game_ve
         event = event.get("name") or event.get("title")
     return Context(
         screen=_norm(state["state_type"]) if state.get("state_type") else None,
-        combat=bool(state.get("enemies")),
+        combat=bool(state.get("enemies")) or state.get("state_type") in (*COMBAT_TYPES, "hand_select"),
         enemies={_norm(e["name"]) for e in state.get("enemies") or [] if e.get("name")},
         cards={_card(c["name"]) for c in state.get("hand") or [] if c.get("name")},
         event=_norm(event) if event else None,
         act=str(state["act"]) if state.get("act") is not None else None,
         floor=str(state["floor"]) if state.get("floor") is not None else None,
-        character=_norm(character) if character else None,
+        character=_norm(character or state.get("character")) if (character or state.get("character")) else None,
         game_version=_norm(game_version) if game_version else None,
     )
 

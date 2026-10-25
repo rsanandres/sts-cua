@@ -43,3 +43,24 @@ def test_fetch_state_from_server_and_unreachable():
     finally:
         server.shutdown()
     assert fetch_state("http://127.0.0.1:9/", timeout=0.5) is None
+
+
+def test_summarize_scoring_fields():
+    menu = {"state_type": "menu", "menu_screen": "main", "message": "Main menu.",
+            "options": ["continue", "abandon_run", "singleplayer"]}
+    assert summarize(menu) == {"state_type": "menu", "menu_screen": "main",
+                               "menu_options": ["continue", "abandon_run", "singleplayer"]}
+    tutorial = {"state_type": "menu", "menu_screen": "tutorial_prompt", "options": [{"name": "no", "enabled": True}]}
+    assert summarize(tutorial)["menu_options"] == ["no"]
+
+    s = summarize({**COMBAT, "player": {**COMBAT["player"], "character": "The Ironclad"}})
+    assert s["ascension"] == 0 and s["character"] == "The Ironclad" and "combat_ended" not in s
+
+    after = {"state_type": "boss", "message": "Combat ended. Waiting for rewards...",
+             "run": {"act": 1, "floor": 17, "ascension": 0}, "player": {"hp": 40, "max_hp": 80}}
+    assert summarize(after)["combat_ended"] is True and "enemies" not in summarize(after)
+
+    game_map = {"state_type": "map", "run": {"act": 1, "floor": 3, "ascension": 0},
+                "map": {"current_position": {"col": 3, "row": 2, "type": "Monster"},
+                        "bosses": [{"col": 3, "row": 15, "id": "ENCOUNTER.VANTOM_BOSS", "name": "Vantom"}]}}
+    assert summarize(game_map)["map_position"] == "Monster" and summarize(game_map)["bosses"] == ["Vantom"]

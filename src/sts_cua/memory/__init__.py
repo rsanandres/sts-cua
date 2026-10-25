@@ -6,7 +6,7 @@ the ones whose showing measurably helped.
 
 - store.py: the notes file (memory/notes.jsonl) and its records
 - retrieve.py: which notes to show each step (and the rule that keys only use what is on screen)
-- runs.py: combats and wasted steps read back from a run directory
+- runs.py: fights (via sts_cua.score) and wasted steps read back from a run directory
 - score.py: utility from shown vs hidden outcomes; probation -> active -> retired
 - reflect.py: one Claude call per run that returns delta operations on the store
 

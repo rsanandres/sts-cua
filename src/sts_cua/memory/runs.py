@@ -1,7 +1,8 @@
-"""Read a run directory back into combats and wasted steps, for scoring and reflection.
+"""Read a run directory back into fights and wasted steps, for scoring and reflection.
 
-Uses only what the harness logged: steps.jsonl (actions, errors, the mod's game
-state summary), meta.json, summary.json and the per-step screenshots.
+Fights come from sts_cua.score.combats (the same per-combat breakdown the supervisor
+writes to score.json); this module adds the step numbers and max HP that note scoring
+needs, and the wasted-step check, which uses the per-step screenshots.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from pathlib import Path
 from PIL import Image
 
 from ..loop import LoopConfig, screen_diff
+from ..score import Combat, combats
 
 
 def load_json(path: Path) -> dict:
@@ -24,11 +26,15 @@ class Run:
     dir: Path
     meta: dict
     summary: dict
-    steps: list[dict]
+    steps: list[dict]  # steps.jsonl records in step order
 
     @property
     def id(self) -> str:
         return self.dir.name
+
+    @property
+    def states(self) -> list[dict | None]:
+        return [s.get("state") for s in self.steps]
 
     @property
     def used_memory(self) -> bool:
@@ -38,79 +44,30 @@ class Run:
 def load_run(run_dir: str | Path) -> Run:
     run_dir = Path(run_dir)
     lines = (run_dir / "steps.jsonl").read_text(encoding="utf-8").splitlines()
-    steps = [json.loads(line) for line in lines if line.strip()]
+    steps = sorted((json.loads(line) for line in lines if line.strip()), key=lambda s: s["step"])
     return Run(run_dir, load_json(run_dir / "meta.json"), load_json(run_dir / "summary.json"), steps)
 
 
-def in_combat(state: dict | None) -> bool:
-    return bool(state and state.get("enemies"))
-
-
-def _hp(state: dict | None) -> tuple[int | None, int | None]:
-    player = (state or {}).get("player") or {}
-    return player.get("hp"), player.get("max_hp")
-
-
 @dataclass
-class Combat:
-    index: int
-    steps: list[int]  # step numbers inside the combat
-    enemies: list[str]
-    act: int | None
-    floor: int | None
-    hp_start: int | None
-    hp_end: int | None
-    max_hp: int | None
-    result: str  # won, lost, unfinished
+class Fight:
+    index: int  # 1-based, in run order
+    combat: Combat
+    steps: list[int]  # step numbers inside the fight
+    max_hp: int | None  # at the start of the fight
 
     @property
     def hp_lost(self) -> int | None:
-        if self.hp_start is None or self.hp_end is None:
-            return None
-        return max(self.hp_start - self.hp_end, 0)
+        """HP lost, never negative (a heal during the fight counts as no loss)."""
+        lost = self.combat.hp_lost
+        return None if lost is None else max(lost, 0)
 
 
-def combats(steps: list[dict]) -> list[Combat]:
-    """Runs of consecutive steps with enemies on screen. Steps with no logged state don't break a run."""
-    groups: list[list[dict]] = []
-    after: list[dict | None] = []  # first state with player HP after each combat
-    current: list[dict] = []
-    for step in steps:
-        state = step.get("state")
-        if state is None:
-            continue
-        if in_combat(state):
-            current.append(step)
-            continue
-        if current:
-            groups.append(current)
-            after.append(state)
-            current = []
-    if current:
-        groups.append(current)
-        after.append(None)
-
+def fights(run: Run) -> list[Fight]:
     out = []
-    for i, (group, next_state) in enumerate(zip(groups, after), 1):
-        first, last = group[0]["state"], group[-1]["state"]
-        hp_start, max_hp = _hp(first)
-        end_hp = _hp(next_state)[0] if next_state is not None else None
-        hp_end = end_hp if end_hp is not None else _hp(last)[0]
-        names = []
-        for step in group:
-            for enemy in step["state"].get("enemies") or []:
-                if enemy.get("name") and enemy["name"] not in names:
-                    names.append(enemy["name"])
-        if hp_end is not None and hp_end <= 0:
-            result = "lost"
-        elif next_state is not None:
-            result = "won"
-        else:
-            result = "unfinished"
-        out.append(Combat(
-            i, [s["step"] for s in group], names, first.get("act"), first.get("floor"),
-            hp_start, hp_end, max_hp, result,
-        ))
+    for i, combat in enumerate(combats(run.states), 1):
+        records = run.steps[combat.first_step - 1: combat.last_step]
+        first = run.steps[combat.first_step - 1].get("state") or {}
+        out.append(Fight(i, combat, [s["step"] for s in records], (first.get("player") or {}).get("max_hp")))
     return out
 
 
@@ -138,8 +95,3 @@ def wasted_steps(run: Run, threshold: float | None = None) -> dict[int, str]:
                     if screen_diff(img_a, img_b) < threshold:
                         out[step["step"]] = "screen unchanged"
     return out
-
-
-def max_floor(steps: list[dict]) -> int | None:
-    floors = [s["state"]["floor"] for s in steps if (s.get("state") or {}).get("floor") is not None]
-    return max(floors) if floors else None

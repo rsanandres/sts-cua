@@ -14,10 +14,11 @@ import re
 from difflib import SequenceMatcher
 
 from .. import pricing
+from ..score import score_run as score_outcome
 from ..actions import Click, Drag, Key, MouseMove, Scroll, TypeText, Wait, describe
 from ..models.base import Usage
 from .retrieve import context_from_state, matches
-from .runs import Run, combats, max_floor, wasted_steps
+from .runs import Run, fights, wasted_steps
 from .score import score_run
 from .store import KEY_NAMES, KINDS, MAX_TEXT, NoteStore, clean_keys, clip_text, now
 
@@ -101,26 +102,28 @@ def _note_line(note, extra: str = "") -> str:
 def digest(store: NoteStore, run: Run) -> str:
     """The run as compact text for the editor."""
     steps = run.steps
-    fights = combats(steps)
+    fought = fights(run)
+    outcome = score_outcome(run.states)
     wasted = wasted_steps(run)
     screens = sorted({s["state"]["state_type"] for s in steps if (s.get("state") or {}).get("state_type")})
     last_state = next((s["state"] for s in reversed(steps) if s.get("state")), None) or {}
     player = last_state.get("player") or {}
     out = [
         f"Run {run.id}: model {run.meta.get('model')}, game build {run.meta.get('game_build')}.",
-        f"Outcome: ended by {run.summary.get('end_reason', 'unknown')} after {len(steps)} steps; "
-        f"max floor {max_floor(steps)}; last screen {last_state.get('state_type')}; "
-        f"HP {player.get('hp')}/{player.get('max_hp')}.",
+        f"Outcome: {outcome.outcome}, ended by {run.summary.get('end_reason', 'unknown')} after {len(steps)} steps; "
+        f"max floor {outcome.max_floor}; bosses killed {outcome.bosses_killed}; score {outcome.score}; "
+        f"last screen {last_state.get('state_type')}; HP {player.get('hp')}/{player.get('max_hp')}.",
         f"Screen types seen: {', '.join(screens) or 'none logged'}.",
         "",
         "Combats (HP is the player's):",
-        "| # | act | floor | enemies | HP start | HP end | HP lost | result | steps |",
-        "|---|---|---|---|---|---|---|---|---|",
+        "| # | act | floor | room | enemies | HP start | HP end | HP lost | result | steps |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
-    for c in fights:
-        out.append(f"| {c.index} | {c.act} | {c.floor} | {', '.join(c.enemies)} | {c.hp_start} | {c.hp_end} | "
-                   f"{c.hp_lost} | {c.result} | {len(c.steps)} |")
-    if not fights:
+    for f in fought:
+        c = f.combat
+        out.append(f"| {f.index} | {c.act} | {c.floor} | {c.room} | {', '.join(c.enemies)} | {c.hp_start} | {c.hp_end} | "
+                   f"{c.hp_lost} | {c.result} | {c.steps} |")
+    if not fought:
         out.append("(no combats logged)")
 
     by_number = {s["step"]: s for s in steps}
@@ -135,12 +138,12 @@ def digest(store: NoteStore, run: Run) -> str:
         out.append(f"- ... {len(wasted) - MAX_PROBLEM_STEPS} more")
 
     key_steps: dict[int, str] = {}
-    for c in fights:
-        key_steps.setdefault(c.steps[0], f"start of combat {c.index}")
-        hp = [((by_number[n].get("state") or {}).get("player") or {}).get("hp") for n in c.steps]
-        drops = [(hp[i] - hp[i + 1], c.steps[i]) for i in range(len(hp) - 1) if hp[i] is not None and hp[i + 1] is not None]
+    for f in fought:
+        key_steps.setdefault(f.steps[0], f"start of combat {f.index}")
+        hp = [((by_number[n].get("state") or {}).get("player") or {}).get("hp") for n in f.steps]
+        drops = [(hp[i] - hp[i + 1], f.steps[i]) for i in range(len(hp) - 1) if hp[i] is not None and hp[i + 1] is not None]
         if drops and max(drops)[0] > 0:
-            key_steps.setdefault(max(drops)[1], f"before the biggest HP drop in combat {c.index} (-{max(drops)[0]})")
+            key_steps.setdefault(max(drops)[1], f"before the biggest HP drop in combat {f.index} (-{max(drops)[0]})")
     for s in steps[-3:]:
         key_steps.setdefault(s["step"], "end of run")
     out += ["", "Your thoughts at key moments:"]
@@ -248,7 +251,9 @@ def apply_ops(store: NoteStore, ops: list[dict], run_id: str) -> list[dict]:
 
 
 def reflect(store: NoteStore, run: Run, client=None, model: str = DEFAULT_MODEL) -> dict:
-    """Score the run, ask Claude for delta ops, apply them, save the store, log the call."""
+    """Score the run, ask Claude for delta ops, apply them, save the store, log the call. Skips reset runs."""
+    if run.meta.get("kind") == "reset":
+        return {"skipped": "reset run", "results": []}
     score = score_run(store, run)
     store.save()  # keep the scores even if the call below fails; memory_score.json marks the run scored
     request = build_request(store, run, model)

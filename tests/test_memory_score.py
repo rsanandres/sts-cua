@@ -3,7 +3,7 @@ import json
 from memory_runs import CLICK, combat, fight, screen, step, write_run
 from PIL import Image
 
-from sts_cua.memory.runs import combats, load_run, wasted_steps
+from sts_cua.memory.runs import fights, load_run, wasted_steps
 from sts_cua.memory.score import MIN_HIDDEN, MIN_SHOWN, estimate, gate, score_run
 from sts_cua.memory.store import NoteStore, Utility
 
@@ -33,11 +33,11 @@ def test_combats_from_logged_states(tmp_path):
     steps = [step(screen("map"))] + fight("Nibbit", 1, 80, 12) + [step(None)] + fight("Cultist", 2, 68, 68)[:-1]
     steps[-1]["state"]["player"]["hp"] = 0
     run = load_run(write_run(tmp_path, "r", steps))
-    first, second = combats(run.steps)
-    assert (first.enemies, first.floor, first.hp_start, first.hp_end, first.hp_lost, first.result) == \
-        (["Nibbit"], 1, 80, 68, 12, "won")
-    assert len(first.steps) == 3
-    assert (second.enemies, second.hp_lost, second.result) == (["Cultist"], 68, "lost")
+    first, second = fights(run)
+    c = first.combat
+    assert (c.enemies, c.floor, c.hp_start, c.hp_end, c.result) == (["Nibbit"], 1, 80, 68, "won")
+    assert (first.index, first.steps, first.max_hp, first.hp_lost) == (1, [2, 3, 4], 80, 12)
+    assert (second.combat.enemies, second.hp_lost, second.combat.result, second.steps) == (["Cultist"], 68, "lost", [7, 8, 9])
 
 
 def test_wasted_steps(tmp_path):
