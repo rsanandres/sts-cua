@@ -116,11 +116,24 @@ cat target.json
 
 Claude needs `ANTHROPIC_API_KEY` (or an `ant auth login` profile). Each run writes `runs/<timestamp>/` with `meta.json`, `steps.jsonl` (thought, reasoning summary, proposed and executed actions, tokens, cost per step), a screenshot per step, and `summary.json`. A run stops at `--max-steps`, at `--max-cost` USD, after 3 steps in a row with no action, or after 3 errors in a row.
 
+### With the local model
+
+Start vLLM in WSL with the command in [docs/hosting.md](docs/hosting.md#model), then point the harness at it:
+
+```
+.venv/bin/python -m sts_cua --display :99 --model qwen3-vl-8b --max-steps 20
+.venv/bin/python -m sts_cua --display :99 --model qwen3-vl-8b --base-url http://localhost:8000/v1 --served-model my-lora --temperature 0
+```
+
+`--served-model` defaults to `Qwen/Qwen3-VL-8B-Instruct-FP8`, the name `vllm serve` gives it; pass a LoRA adapter's name to run that instead. Set `VLLM_API_KEY` if vLLM runs with `--api-key`. The adapter uses Qwen3-VL's own `computer_use` tool and `<tool_call>` format, with coordinates on a 0-1000 scale converted to screen pixels. Its steps cost $0, and each step's `raw` holds the request (screenshot replaced by a placeholder; it's saved next to the step), the reply text, token usage, per-token logprobs and token IDs, for building SFT and RL data later.
+
 Code map:
 
 - `src/sts_cua/loop.py`: screenshot, decide, act, log.
 - `src/sts_cua/models/base.py`: the `Model.decide(Observation) -> Decision` interface every adapter implements.
+- `src/sts_cua/models/factory.py`: `add_model_args(parser)` and `build_model(args)`, shared by every CLI that picks a model.
 - `src/sts_cua/models/claude.py`: Claude adapter on the `computer_toolset_20260801` tool. Each step is a fresh request (cached system prompt and tools, a text log of recent steps, the current screenshot), so nothing is replayed and cost per step stays flat.
+- `src/sts_cua/models/qwen.py`: Qwen3-VL adapter for vLLM's OpenAI-compatible server, the same fresh request each step.
 - `src/sts_cua/screen.py`: `X11Screen` (mss capture, xdotool input) and `FakeScreen` for tests.
 - `src/sts_cua/runlog.py`, `src/sts_cua/pricing.py`: run logs and per-step cost.
 
