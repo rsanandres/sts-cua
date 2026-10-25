@@ -10,6 +10,8 @@ import argparse
 import json
 from pathlib import Path
 
+EXEMPT = ("menu", "game_over")  # LoopConfig.stall_exempt
+
 
 def streaks(steps: list[dict]) -> list[tuple[int, int, int]]:
     """(length, first step, last step) of each run of stalled acting steps."""
@@ -23,7 +25,7 @@ def streaks(steps: list[dict]) -> list[tuple[int, int, int]]:
             if count:
                 out.append((count, start, last))
             count = 0
-        elif acted and not r.get("waiting"):
+        elif acted and not r.get("waiting") and state.get("state_type") not in EXEMPT:
             count += 1
             start = r["step"] if count == 1 else start
             last = r["step"]

@@ -27,6 +27,9 @@ class LoopConfig:
     # Stop after this many acting steps in a row that left the game state (from state_fn) exactly the same.
     # Catches loops the screen check misses, e.g. hover tooltips changing pixels while nothing happens.
     max_stalled: int | None = 15
+    # Screens where the mod's state stays the same while the game moves on (Timeline reveals, unlock and
+    # story screens after a run): they never count as stalled.
+    stall_exempt: tuple[str, ...] = ("menu", "game_over")
     # Stop after this many seconds without an action that changed the screen (co-op; None: no limit).
     max_idle_seconds: float | None = None
     poll_seconds: float = 0.5  # how often a rule's wait (hold) re-reads the mod state
@@ -104,7 +107,7 @@ def run(
                 acted = bool(history) and any(not isinstance(a, Wait) for a in history[-1].actions)
                 if signature != previous_state:
                     stalled = 0
-                elif acted and not waiting:
+                elif acted and not waiting and state.get("state_type") not in config.stall_exempt:
                     stalled += 1
                 previous_state = signature
                 if config.max_stalled and stalled >= config.max_stalled:
