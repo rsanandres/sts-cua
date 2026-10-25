@@ -19,12 +19,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-# Agent runs: the harness (`python -m sts_cua ...`), the supervisor and the memory CLI,
-# but not this app (`python -m sts_cua.app`). tools/stack_down.sh uses the same pattern.
-AGENT_PATTERN = r"python[0-9.]* -m sts_cua(\.supervisor|\.memory)?( |$)"
-# A game-playing run, for /api/live: the harness or the supervisor.
-RUN_PATTERN = r"python[0-9.]* -m sts_cua(\.supervisor)?( |$)"
-SUPERVISOR_PATTERN = r"python[0-9.]* -m sts_cua\.supervisor( |$)"
+# Agent runs: the harness (`python -m sts_cua ...`), the supervisor, the memory CLI and
+# the memory A/B evaluation, but not this app (`python -m sts_cua.app`).
+# tools/stack_down.sh uses the same pattern.
+AGENT_PATTERN = r"python[0-9.]* -m sts_cua(\.supervisor|\.memory|\.eval)?( |$)"
+# A game-playing run, for /api/live: the harness, the supervisor or an evaluation (which drives the supervisor).
+RUN_PATTERN = r"python[0-9.]* -m sts_cua(\.supervisor|\.eval run)?( |$)"
+SUPERVISOR_PATTERN = r"python[0-9.]* -m sts_cua\.(supervisor|eval run)( |$)"
 VLLM_PATTERN = "vllm serve|vllm.entrypoints|llama-server"
 
 

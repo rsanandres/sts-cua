@@ -72,3 +72,12 @@ All JSON. Errors: `{"error": "message"}` with 4xx/5xx: 400 invalid input, 401 no
 - `GET /api/memory/notes?status=all|probation|active|retired` -> `{"path": str, "notes": [note dicts from memory/notes.jsonl]}`
 - `POST /api/memory/notes/<id>/retire` -> `{"retired": true}`; 404 for an unknown id, 409 while a reflect is running. (A supervisor with `--memory` also edits the store after each run; a retire landing in those few seconds can be lost.)
 - `POST /api/memory/reflect` -> body `{"run_id": str}`; runs `python -m sts_cua.memory reflect runs/<run_id>` in the background (log `reflect`). `{"started": true}`; 404 for an unknown run, 409 while one is running.
+
+## Evaluations
+
+Read-only views of memory A/B experiments (`python -m sts_cua.eval`, files in `runs/evals/<name>/`).
+
+- `GET /api/evals` -> `{"evals": [{"name", "created_at", "mode": "paired"|"unpaired", "arms": [str, str], "planned_runs", "valid_runs", "complete": bool, "stop_reason": str|null, "cost_usd", "p_value": float|null}]}`, newest first. A directory without a readable `plan.json` is skipped.
+- `GET /api/evals/<name>` -> `{"plan": {...plan.json}, "report": {...}, "results": [results.jsonl lines]}`. The report is rebuilt from the results on each call (same shape as `report.json`: `per_arm` mean/median score, win rate, mean floor, cost; `test` with `test`, `p_value`, `method`, `effect_size`, `mean_difference`; `win_rate_test`; `notes`; `warnings`). `name` must match `^[\w.-]+$` and stay inside `runs/evals/`; 404 when there is no plan, 500 when it can't be read.
+
+An evaluation run (`python -m sts_cua.eval run`) counts as the supervisor in `/api/status`, `/api/live` and `/api/runs/stop`, and `tools/stack_down.sh` stops it.

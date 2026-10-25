@@ -490,6 +490,45 @@ class App:
                              cwd=self.config.repo, env={"PYTHONUNBUFFERED": "1"})
         return {"started": True}
 
+    # memory A/B evaluations (sts_cua.eval), read-only
+
+    def _eval(self, d: Path) -> tuple[dict, list[dict], dict]:
+        from .. import eval as evaluation
+
+        plan, results = evaluation.load_plan(d), evaluation.load_results(d)
+        saved = files.read_json(d / evaluation.REPORT_FILE) or {}
+        return plan, results, evaluation.build_report(plan, results, stop_reason=saved.get("stop_reason"))
+
+    def evals_list(self, **_) -> dict:
+        from .. import eval as evaluation
+
+        out = []
+        for d in evaluation.list_evals(self.config.runs):
+            try:
+                plan, _, report = self._eval(d)
+            except (OSError, ValueError, KeyError, TypeError, AttributeError):
+                continue  # a broken plan is skipped, not a 500 for the whole list
+            out.append({
+                "name": d.name, "created_at": plan.get("created_at"), "mode": report["mode"], "arms": report["arms"],
+                "planned_runs": report["planned_runs"], "valid_runs": report["valid_runs"],
+                "complete": report["complete"], "stop_reason": report["stop_reason"], "cost_usd": report["cost_usd"],
+                "p_value": (report["test"] or {}).get("p_value"),
+            })
+        out.sort(key=lambda e: e["created_at"] or "", reverse=True)
+        return {"evals": out}
+
+    def eval_detail(self, name: str, **_) -> dict:
+        from .. import eval as evaluation
+
+        d = files.inside(self.config.runs / evaluation.EVALS_DIR, _name(name, "name"))
+        if d is None or not (d / evaluation.PLAN_FILE).is_file():
+            raise ApiError(404, f"no evaluation {name}")
+        try:
+            plan, results, report = self._eval(d)
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
+            raise ApiError(500, f"can't read evaluation {name}: {e}") from None
+        return {"plan": plan, "report": report, "results": results}
+
 
 _SEG = r"(?P<{}>[\w.-]+)"
 # (method, path regex, handler name). Path groups become handler keyword arguments.
@@ -514,6 +553,8 @@ ROUTES = [
     ("GET", r"/api/memory/notes", "notes"),
     ("POST", r"/api/memory/notes/" + _SEG.format("note_id") + "/retire", "retire"),
     ("POST", r"/api/memory/reflect", "reflect"),
+    ("GET", r"/api/evals", "evals_list"),
+    ("GET", r"/api/evals/" + _SEG.format("name"), "eval_detail"),
 ]
 COMPILED = [(method, re.compile(pattern + "$"), name) for method, pattern, name in ROUTES]
 OPEN = {"health"}  # no token needed

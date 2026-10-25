@@ -114,6 +114,14 @@ def test_screens(stub, browser, tmp_path, name):
     assert rows.count() == 5
     page.uncheck("#show-reset")
     assert "$0.42" in page.locator("#res-budget").inner_text()
+
+    # Evals: the list, then one experiment's report
+    page.locator("#evals-table tbody tr[data-eval=memory-ab1]").wait_for()
+    assert "7/8" in page.locator("#evals-table").inner_text()
+    page.click("#evals-table tbody tr[data-eval=memory-ab1]")
+    page.wait_for_function("document.getElementById('eval-detail').textContent.includes('Wilcoxon')")
+    assert page.locator("#eval-detail tbody tr").count() == 2
+    assert "Paired by seed" in page.locator("#eval-detail").inner_text()
     no_horizontal_scroll(page)
     page.screenshot(path=str(out / f"ui-results-{name}.png"), full_page=True)
 

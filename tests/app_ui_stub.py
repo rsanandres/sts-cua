@@ -132,6 +132,28 @@ def make_notes() -> list[dict]:
     ]
 
 
+
+def make_evals() -> dict[str, dict]:
+    """One paired experiment, its report built by the real sts_cua.eval.build_report."""
+    from sts_cua import eval as evaluation
+
+    arms = ["none", "frozen:memory/frozen/notes-20261025.jsonl"]
+    seeds = ["SEEDA1", "SEEDB2", "SEEDC3", "SEEDD4"]
+    plan = {"name": "memory-ab1", "created_at": iso(600), "mode": "paired",
+            "arms": [{"label": a, "memory": None, "sha256": None} for a in arms], "seeds": seeds,
+            "runs_per_arm": 4, "character": "the Ironclad", "ascension": 0, "max_attempts": 2,
+            "schedule": evaluation.schedule(arms, seeds, 4)}
+    scores = {"none": [7, 12, 9, 20], arms[1]: [11, 15, 9, 37.33]}
+    results = []
+    for slot in plan["schedule"][:7]:  # one run still to play
+        score = scores[slot["arm"]][slot["pair"]]
+        results.append({**slot, "attempt": 1, "valid": True, "invalid_reason": None, "warnings": [],
+                        "seed_played": slot["seed"], "score": score, "floor": int(score), "outcome": "died",
+                        "cost_usd": 0.3, "end_reason": "run_over:died"})
+    report = evaluation.build_report(plan, results, stop_reason="budget")
+    return {plan["name"]: {"plan": plan, "results": results, "report": report}}
+
+
 class Stub:
     """Mutable fake backend state shared by the handler threads."""
 
@@ -140,6 +162,7 @@ class Stub:
         self.calls: list[tuple[str, dict]] = []
         self.runs = make_runs()
         self.notes = make_notes()
+        self.evals = make_evals()
         self.running = True
         self.live_step = 5
         self.busy_polls = 0
@@ -255,6 +278,20 @@ def make_handler(stub: Stub, require_auth: bool = True):
                 status = q.get("status", "all")
                 notes = [n for n in stub.notes if status == "all" or n["status"] == status]
                 return self.send_json({"path": "memory/notes.jsonl", "notes": notes})
+            if path == "/api/evals":
+                return self.send_json({"evals": [{
+                    "name": name, "created_at": e["plan"]["created_at"], "mode": e["report"]["mode"],
+                    "arms": e["report"]["arms"], "planned_runs": e["report"]["planned_runs"],
+                    "valid_runs": e["report"]["valid_runs"], "complete": e["report"]["complete"],
+                    "stop_reason": e["report"]["stop_reason"], "cost_usd": e["report"]["cost_usd"],
+                    "p_value": (e["report"]["test"] or {}).get("p_value"),
+                } for name, e in stub.evals.items()]})
+            m = re.match(r"^/api/evals/([^/]+)$", path)
+            if m:
+                found = stub.evals.get(m.group(1)) if SAFE.match(m.group(1)) else None
+                if found is None:
+                    return self.send_json({"error": "no such evaluation"}, 404)
+                return self.send_json(found)
             m = re.match(r"^/api/logs/([\w.-]+)$", path)
             if m:
                 if m.group(1) not in LOGS:

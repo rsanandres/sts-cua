@@ -22,7 +22,7 @@ Decided:
 1. **Supervisor.** Full runs back to back under the daily budget, with end-of-run detection from the mod state.
 2. **Score.** 100 for a win, otherwise floor + 52/3 per boss killed (AgenticSTS's score). It moves long before win rate does.
 3. **Per-combat breakdown.** Enemy names, HP at start and end, HP lost, won or lost, steps. Both memory and RL reuse it.
-4. **Fixed evaluation seeds,** kept separate from the seeds memory is written on. **Unverified:** whether Spire 2 seeds give repeatable runs, and whether the mod can restore a state mid-run.
+4. **Fixed evaluation seeds,** kept separate from the seeds memory is written on. Seeds are typed into a Custom run by the agent (`python -m sts_cua.eval`, README "Memory A/B evaluation"). **Unverified:** whether Spire 2 seeds give repeatable runs on the agent's profile, and whether the mod can restore a state mid-run.
 5. **Measure:** steps per full run, steps per hour, and cost per run.
 
 ## Stage 1: memory loop
@@ -41,7 +41,7 @@ Based on AgenticSTS, ExpeL ([2308.10144](https://arxiv.org/abs/2308.10144)) and 
   - Saving everything scored worse than a fixed memory (55.48 vs 67.53), and strict filtering on entry scored 70.95 ([2505.16067](https://arxiv.org/abs/2505.16067)).
 - **Guarding against bad notes.** Cap writes per run, require evidence from more than one run, tag notes with the game build, and re-check them after patches. Poisoning attacks need under 0.1% of memory to succeed over 80% of the time ([AgentPoison](https://arxiv.org/abs/2407.12784)), so one bad run must not be able to rewrite the playbook.
 - **Claude's memory tool.** `memory_20250818` runs client-side ([docs](https://platform.claude.com/docs/en/agents-and-tools/tool-use/memory-tool)). The API tells the model to view its memory before anything else, which adds round-trips to every per-step request. If we use it at all, it goes in the post-run call only.
-- **Evaluation.** Paired fixed seeds: no memory vs a frozen memory snapshot, same character, A0.
+- **Evaluation.** Paired fixed seeds: no memory vs a frozen memory snapshot, same character, A0. Built as `python -m sts_cua.eval`, with an unpaired fallback (Mann-Whitney U) if seeds can't be set.
   - The primary metric is the score above, compared per seed with a paired test. Win rate is secondary.
   - Telling a 30% win rate from a 60% one takes many runs per arm (about 42 by our own power estimate), so floor-based scores are what fit the budget.
 
