@@ -7,7 +7,8 @@
 Install them on the desktop from a WSL terminal:
 
 ```
-cp ~/sts-cua/tools/windows/sts-cua-*.cmd "$(wslpath "$(powershell.exe -NoProfile -Command '[Environment]::GetFolderPath(\"Desktop\")' | tr -d '\r')")/"
+DESKTOP=$(powershell.exe -NoProfile -Command "[Environment]::GetFolderPath('Desktop')" | tr -d '\r')
+cp ~/sts-cua/tools/windows/sts-cua-*.cmd "$(wslpath "$DESKTOP")/"
 ```
 
 `wsl --shutdown` stops every WSL distro and Docker Desktop's WSL backend too, not just this project.
