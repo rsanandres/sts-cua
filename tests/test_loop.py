@@ -252,3 +252,13 @@ def test_waits_and_missing_state_do_not_stall(tmp_path):
     summary = run(ScriptedModel([[Click(1, 2)]] * 10), FakeScreen(frames), log,
                   LoopConfig(max_steps=6, settle_seconds=0, max_stalled=2), state_fn=lambda: None)
     assert summary["end_reason"] == "max_steps"
+
+
+def test_menu_screens_never_stall(tmp_path):
+    # Timeline reveals and story screens change the picture while the mod's menu state stays put.
+    frames = [Image.new("RGB", (64, 36), (i, 0, 0)) for i in range(0, 200, 20)]
+    log = RunLog(tmp_path, meta={})
+    summary = run(ScriptedModel([[Click(1, 2)]] * 10), FakeScreen(frames), log,
+                  LoopConfig(max_steps=8, settle_seconds=0, max_stalled=2),
+                  state_fn=lambda: {"state_type": "menu", "menu_screen": "timeline"})
+    assert summary["end_reason"] == "max_steps"
