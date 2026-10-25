@@ -130,3 +130,15 @@ def test_first_in_run_state_after_the_menu_is_a_floor_row(tmp_path):
     _, steps, summary = load_run(run_dir)
     found = [(h.step, h.kind, h.text) for h in highlights(steps, step_diffs(run_dir, steps), summary)]
     assert found == [(2, "floor", "Run starts on floor 1")]
+
+
+def test_choosing_cards_mid_fight_does_not_end_it(tmp_path):
+    run_dir = write_run(tmp_path, [
+        {"state": fight_state(19, 70, ("Exoskeleton",)), "executed": CLICK},
+        {"state": {"state_type": "hand_select", "floor": 19, "player": {"hp": 66, "max_hp": 70}}, "executed": CLICK},
+        {"state": fight_state(19, 66, ("Exoskeleton",)), "executed": CLICK},
+        {"state": {**fight_state(19, 60, ()), "combat_ended": True}, "executed": CLICK},
+    ])
+    _, steps, summary = load_run(run_dir)
+    kinds = [(h.step, h.kind) for h in highlights(steps, step_diffs(run_dir, steps), summary)]
+    assert kinds == [(1, "fight"), (4, "fight won")]

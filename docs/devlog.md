@@ -104,6 +104,23 @@ Make footage from any run with `python -m sts_cua.replay runs/<run>` (see the RE
 - Compared with Haiku on similar floors, which lost 12-19 HP per fight, Sonnet blocks and sequences far better. It costs $0.0064 a step against Haiku's $0.0004.
 - At about 14 steps a floor, a full run (about 50 floors) on Sonnet would cost several dollars, more than the $2/day budget. Haiku could do one for well under $1.
 
+### Act 1 cleared: Sonnet's first long run
+
+- Run `20261025T194812Z`: Sonnet 5.5 (thinking on, effort low, recorded) continued the Silent run from floor 5 with a $20 cap. It beat the Act 1 boss and died on floor 28 in Act 2: 435 steps, $2.78, 70 minutes. `screen.mp4` is 1:10:09 and `replay.mp4` is 10:52.
+- Act 1 went well.
+  - It rested at 4 of 5 rest sites when hurt and upgraded Noxious Fumes at the fifth, at full HP.
+  - At the Jungle Maze event it took the gold option over losing 18 HP. At Tablet of Truth it took +20 HP.
+  - It beat the Act 1 boss, Vantom (173 HP, Slippery), in 7 turns with poison: 37-40 poison stacks, 70 → 29 HP. Took Tools of the Trade.
+- Act 2:
+  - Ancient: took Yummy Cookie and upgraded 4 cards.
+  - Fights: Exoskeletons, Thieving Hopper and Spiny Toad, all won on poison.
+  - Shop, about 512 gold: removed a Strike, bought Escape Plan, Piercing Wail, Outbreak, Leading Strike and a relic, leaving 7 gold.
+  - Four Exoskeletons on floor 24 took it down to 9 HP, and it rested back to 30.
+- Death on floor 28: The Obscura and Parafright hit for 19, then 13, leaving it at 3 HP. It spent its last ~30 steps trying to target enemies with Leading Strike and Shivs. Most clicks on the enemy sprites didn't register, and tooltips covered the hand. "The Obscura and its illusion smashed The Silent."
+- It never drank a potion, not even at 3 HP with full potion slots. Every model has done this in every run so far. It's the biggest gap.
+- It got lost leaving the merchant again, about 9 steps between the shop and the tent's Proceed. Every model has done this in every run.
+- Cost: $0.0064 per step, about $0.10 per floor. A full run on Sonnet looks like about $5.
+
 ## Clip ideas
 
 - The 39-click loop on a visited node (`20261025T165758Z`).
@@ -114,4 +131,7 @@ Make footage from any run with `python -m sts_cua.replay runs/<run>` (see the RE
 - Sonnet starting at 18 HP, spending its gold on a card instead of healing, then dying on floor 8 with two potions unused (`20261025T183740Z`).
 - Both models getting lost leaving the merchant.
 - Sonnet's clean floors 1-5 with 7 HP lost, against Haiku's 12-19 HP per fight (`20261025T191243Z`, with real-time footage).
+- Sonnet beats Vantom with poison stacks (`20261025T194812Z`, floor 17).
+- Spending 512 gold at the Act 2 shop, then getting lost leaving it (`20261025T194812Z`, floor 22).
+- The last stand at 3 HP: clicks that don't land, potions never touched (`20261025T194812Z`, floor 28).
 - Haiku vs Sonnet on the same floors, with the cost per floor.
