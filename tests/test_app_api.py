@@ -84,7 +84,8 @@ def test_runs_list_and_detail(app_server):
     live, old = body["runs"]
     assert old == {"run_id": OLD_RUN, "kind": "game", "model": "claude-haiku-5-5",
                    "started_at": "2026-10-25T00:00:00+00:00", "end_reason": "run_over:died", "steps": 3,
-                   "cost_usd": 0.25, "outcome": "died", "floor": 7, "score": 7.0}
+                   "cost_usd": 0.25, "outcome": "died", "floor": 7, "score": 7.0, "seed": None,
+                   "outcome_source": None}
     assert live["end_reason"] is None and live["score"] is None and live["steps"] is None
     assert [r["run_id"] for r in c.get("/api/runs?limit=1")[1]["runs"]] == [LIVE_RUN]
 
@@ -93,6 +94,19 @@ def test_runs_list_and_detail(app_server):
     assert body["score"]["outcome"] == "died"
     assert c.get(f"/api/runs/{LIVE_RUN}")[1]["summary"] is None
     assert c.get("/api/runs/20990101T000000Z")[0] == 404
+
+
+def test_runs_list_seed_from_run_history(app_server):
+    # score.json as the supervisor writes it when the mod's run history knew the run.
+    (app_server.repo / "runs" / OLD_RUN / "score.json").write_text(json.dumps({
+        "outcome": "won", "score": 100.0, "max_floor": 51, "seed": "2450ZAR9EF", "outcome_source": "compendium",
+        "outcome_states": "abandoned", "history": {"id": "1778295706", "seed": "2450ZAR9EF", "match": "new_id"},
+    }))
+    c = app_server.client
+    old = next(r for r in c.get("/api/runs")[1]["runs"] if r["run_id"] == OLD_RUN)
+    assert (old["outcome"], old["seed"], old["outcome_source"], old["floor"]) == ("won", "2450ZAR9EF", "compendium", 51)
+    score = c.get(f"/api/runs/{OLD_RUN}")[1]["score"]
+    assert score["outcome_states"] == "abandoned" and score["history"]["match"] == "new_id"
 
 
 def test_run_steps_paged_without_raw(app_server):

@@ -32,7 +32,7 @@ Schema facts, read in that commit:
 - `docs/raw-full.md`: the same schema with examples.
 - Not in the singleplayer state: the seed, and whether a run was won. The saved run
   history (`win`, `was_abandoned`, `seed`) is only in `GET /api/v1/compendium`
-  (`McpMod.Compendium.cs`, `BuildRunHistoryEntry`).
+  (`McpMod.Compendium.cs`, `BuildRunHistoryEntry`); see history.py.
 """
 
 from __future__ import annotations

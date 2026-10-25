@@ -82,7 +82,7 @@ How much does reasoning buy you in Spire, and on which decisions? Run the agents
 
 - Spire 2 runs on Linux under Xvfb in a container, with software or GPU rendering.
 - Licensing and Steam behavior when running several copies at once from one purchase.
-- Whether Spire 2 writes a run-history file we can score from without a mod.
+- Whether the game's `saves/history/*.run` files can be read directly without the mod (the mod reads them for `/api/v1/compendium`; their format is the game's and isn't documented).
 - Which open CUA model fits the GPU's VRAM.
 
 ## Build order
@@ -166,7 +166,7 @@ DOTNET_ROOT=~/.dotnet ~/.dotnet/dotnet build STS2_MCP.csproj -c Release \
 
 Copy `STS2_MCP.dll` + `STS2_MCP.json` into `<game>/mods/` and accept the "Load Mods?" dialog. With mods on, the game uses separate `modded/profileN` saves, so the agent's modded Profile 3 can't touch normal saves.
 
-The harness only reads `GET /api/v1/singleplayer` (`src/sts_cua/state.py`) and logs a summary per step as ground truth (screen type, floor, HP, energy, hand, enemies and intents). The agent never sees it; it stays pixel-only. Never call the mod's POST endpoints from the harness.
+The harness only reads `GET /api/v1/singleplayer` (`src/sts_cua/state.py`) and, between runs, `GET /api/v1/compendium` for the run history (`src/sts_cua/history.py`). It logs a summary per step as ground truth (screen type, floor, HP, energy, hand, enemies and intents). The agent never sees it; it stays pixel-only. Never call the mod's POST endpoints from the harness.
 
 ## Play runs back to back
 
@@ -178,7 +178,9 @@ python -m sts_cua.supervisor --display :99 --model claude-haiku-5-5 --thinking o
 python -m sts_cua.supervisor ... --memory memory/notes.jsonl                # learn across runs (see below)
 ```
 
-Each game run starts a new singleplayer run from the main menu and plays it to the end. A run stops when the mod shows the game-over screen or a menu after the run started, or at the usual caps (`--max-steps` 3000, `--max-cost` per run, default whatever is left of today's budget, 10 idle steps in a row). Then the supervisor writes `score.json` into the run dir: outcome (won, died, abandoned, unknown), max floor, bosses killed, and a per-combat breakdown. It also appends one line to `runs/ledger.jsonl`. Score is 100 for a win, otherwise floor + 52/3 per boss killed (AgenticSTS's score).
+Each game run starts a new singleplayer run from the main menu and plays it to the end. A run stops when the mod shows the game-over screen or a menu after the run started, or at the usual caps (`--max-steps` 3000, `--max-cost` per run, default whatever is left of today's budget, 10 idle steps in a row). Then the supervisor writes `score.json` into the run dir: outcome (won, died, abandoned, unknown), max floor, bosses killed, seed, and a per-combat breakdown. It also appends one line to `runs/ledger.jsonl`. Score is 100 for a win, otherwise floor + 52/3 per boss killed (AgenticSTS's score).
+
+The outcome, floor and seed come from the game's own run history when the run is in it. The game writes a `.run` file per finished run (`win`, `was_abandoned`, `seed`, `start_time`, map points), and the mod summarizes the 20 newest at `GET /api/v1/compendium` (`--compendium-url`). Before each game run the supervisor snapshots the entry ids; after it, the new entry whose `start_time` falls in the run's time window is the run (character and floor break ties, then the newest). It polls up to 3 times, 2 s apart, after a run that reached its end. Then `score.json` and the ledger say `outcome_source: "compendium"`, and keep the states' guess in `outcome_states` (and `max_floor_states` in score.json) when it disagrees; `score.json["history"]` holds the entry. With no new entry (the mod is down, or the run was cut off by a cap), the outcome is inferred from the logged states as before (`outcome_source: "states"`, `seed` null). That inference assumes Act 3 is the last act and that Give Up shows the game-over screen with HP left, so it is only the fallback. Schema and the assumptions still to check on the PC are in `src/sts_cua/history.py`.
 
 If the game isn't on the main menu with no saved run before a run, a short reset run (meta `kind: "reset"`, no score) asks the model to get it there. The daily budget is the sum of `cost_usd` in `runs/*/summary.json` that ended today in America/Los_Angeles, reset runs and earlier sessions included, plus the `cost_usd` of each `runs/*/memory_reflect.json` by its `time` (the run's summary never includes the reflect call, so nothing is counted twice). The supervisor stops when less than `--reserve` ($0.10) is left, after `--max-runs`, when the mod can't be reached, when the reset fails, or after 3 runs in a row that never got into a run.
 
@@ -186,6 +188,7 @@ With `--memory PATH`, each game run gets a fresh `Retriever` over the store (a n
 
 - `src/sts_cua/supervisor.py`: the session loop and budget accounting.
 - `src/sts_cua/score.py`: outcome, score and per-combat breakdown from a run's logged states (`load_states(run_dir)`), and the stop check (`RunOverDetector`).
+- `src/sts_cua/history.py`: read-only client for the mod's run history, and `find_run`, which picks a finished run's entry.
 
 ## Memory across runs
 

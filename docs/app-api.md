@@ -61,7 +61,8 @@ All JSON. Errors: `{"error": "message"}` with 4xx/5xx: 400 invalid input, 401 no
 ## Results
 
 - `GET /api/ledger?limit=100` -> `{"entries": [ledger.jsonl lines, newest first]}` (limit 1..1000)
-- `GET /api/runs?limit=50` -> `{"runs": [{"run_id", "kind", "model", "started_at", "end_reason", "steps", "cost_usd", "outcome", "floor", "score"}]}` (newest first, limit 1..500; from meta/summary/score.json, `floor` is score.json's `max_floor`; missing files -> nulls)
+- `GET /api/runs?limit=50` -> `{"runs": [{"run_id", "kind", "model", "started_at", "end_reason", "steps", "cost_usd", "outcome", "floor", "score", "seed", "outcome_source"}]}` (newest first, limit 1..500; from meta/summary/score.json, `floor` is score.json's `max_floor`; missing files -> nulls)
+  `seed` and `outcome_source` ("compendium" when the outcome came from the game's run history, "states" when inferred from the logged states) are score.json's; runs scored before they existed have nulls.
 - `GET /api/runs/<run_id>` -> `{"meta": {...}, "summary": {...}|null, "score": {...}|null}`
 - `GET /api/runs/<run_id>/steps?offset=0&limit=50` -> `{"total": int, "steps": [steps.jsonl records without "raw"]}` (limit 1..500)
 - `GET /api/runs/<run_id>/screenshots/<file>.png` -> image/png (path-traversal safe: run_id and file must match `^[\w.-]+$`, and the resolved path must stay inside runs/, so symlinks out are refused)

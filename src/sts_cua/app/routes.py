@@ -419,7 +419,8 @@ class App:
                 "run_id": run.name, "kind": meta.get("kind"), "model": meta.get("model"),
                 "started_at": meta.get("started_at"), "end_reason": summary.get("end_reason"),
                 "steps": summary.get("steps"), "cost_usd": summary.get("cost_usd"), "outcome": score.get("outcome"),
-                "floor": score.get("max_floor"), "score": score.get("score"),
+                "floor": score.get("max_floor"), "score": score.get("score"), "seed": score.get("seed"),
+                "outcome_source": score.get("outcome_source"),
             })
         return {"runs": out}
 

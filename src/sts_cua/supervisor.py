@@ -7,6 +7,10 @@ short reset run (its own run dir, meta kind "reset") asks the model to get there
 game run stops when the mod state shows the run is over (score.RunOverDetector), then
 gets a score.json and one line in runs/ledger.jsonl.
 
+The outcome, floor and seed come from the game's own run history when the run is found
+there (sts_cua.history: the mod's /api/v1/compendium, snapshotted before each game run so
+the new entry is known exactly); otherwise from the logged states (score.score_run).
+
 With --memory, each game run sees matching notes from the store (a fresh probation seed
 per run, in meta.json["memory"]); after it, the run is scored against the store and one
 reflect call (sts_cua.memory.reflect) edits it. Reset runs get no notes and no reflect.
@@ -28,6 +32,8 @@ from pathlib import Path
 from typing import Callable
 from zoneinfo import ZoneInfo
 
+from .history import DEFAULT_URL as HISTORY_URL
+from .history import HistoryEntry, entry_ids, fetch_history, find_run, run_outcome
 from .loop import LoopConfig, run
 from .memory.reflect import REFLECT_FILE, reflect
 from .memory.retrieve import for_run
@@ -78,6 +84,8 @@ class SupervisorConfig:
     memory_path: Path | None = None  # note store; None: no memory
     reflect: bool = True  # with memory: one reflect call after each game run
     reflect_reserve_usd: float = 0.05  # expected reflect cost: kept out of a run's cap, and needed to reflect
+    history_retries: int = 3  # run-history polls after a run that ended on the game-over screen or a menu
+    history_retry_seconds: float = 2.0
 
 
 @dataclass
@@ -125,11 +133,14 @@ def supervise(
     sleep: Callable[[float], None] = time.sleep,
     echo: Callable[[str], None] = print,
     reflect_client_factory: Callable[[], object] | None = None,
+    history_fn: Callable[[], list[HistoryEntry] | None] | None = None,
 ) -> Session:
     """Run games until the budget, the run limit, or a problem stops the session.
 
     model_factory(goal) builds a model for one run; state_fn returns the summarized mod state.
     reflect_client_factory() builds the Anthropic client for a reflect call (default: anthropic.Anthropic()).
+    history_fn() returns the mod's run history (history.fetch_history), None when unreachable;
+    without it, outcomes come from the states alone.
     """
     runs_dir = Path(config.runs_dir)
     runs_dir.mkdir(parents=True, exist_ok=True)
@@ -194,6 +205,25 @@ def supervise(
             }, indent=2) + "\n", encoding="utf-8")
         return out
 
+    def look_up(seen: set[str] | None, started_at: str, result, run_ended: bool) -> tuple[HistoryEntry | None, str | None]:
+        """This run's new history entry, polling a few times when the run reached its end. Never raises."""
+        if history_fn is None:
+            return None, None
+        tries = config.history_retries if run_ended else 1
+        for attempt in range(max(tries, 1)):
+            try:
+                entries = history_fn()
+                found = find_run(entries, datetime.fromisoformat(started_at), clock(), seen_ids=seen,
+                                 character=result.character, floor=result.max_floor)
+            except Exception as exc:  # the history is a bonus; the states still score the run
+                echo(f"run history lookup failed: {exc!r}")
+                return None, None
+            if found is not None:
+                return found, "new_id" if seen is not None else "time_window"
+            if attempt + 1 < tries:
+                sleep(config.history_retry_seconds)
+        return None, None
+
     while True:
         if config.max_runs is not None and len(entries) >= config.max_runs:
             return Session(entries, "max_runs")
@@ -217,6 +247,12 @@ def supervise(
         notes_fn, memory_meta = None, None
         if config.memory_path is not None:
             notes_fn, memory_meta = for_run(config.memory_path, config.game_build)
+        seen = None
+        if history_fn is not None:
+            try:
+                seen = entry_ids(history_fn())
+            except Exception as exc:
+                echo(f"run history snapshot failed: {exc!r}")
         model, screen = model_factory(config.game_goal), screen_factory()
         log = RunLog(runs_dir, meta={
             **meta(model, "game", config.game_goal, screen), **({"memory": memory_meta} if memory_meta else {}),
@@ -227,13 +263,18 @@ def supervise(
                       stop_fn=RunOverDetector(), notes_fn=notes_fn)
 
         result = score_run(load_states(log.dir))
-        (log.dir / "score.json").write_text(json.dumps(result.to_dict(), indent=2) + "\n", encoding="utf-8")
+        found, match = look_up(seen, started_at, result, summary["end_reason"].startswith("run_over"))
+        scored = run_outcome(result, found, match)
+        if scored["outcome_states"] is not None:
+            echo(f"{log.dir.name}: run history says {scored['outcome']}, the states said {scored['outcome_states']}")
+        (log.dir / "score.json").write_text(json.dumps(scored, indent=2) + "\n", encoding="utf-8")
         entry = {
             "run_dir": str(log.dir), "started_at": started_at, "ended_at": summary["ended_at"],
             "model": model.name, "cost_usd": summary["cost_usd"], "steps": summary["steps"],
-            "end_reason": summary["end_reason"], "outcome": result.outcome, "floor": result.max_floor,
-            "bosses_killed": result.bosses_killed, "score": result.score, "character": result.character,
-            "ascension": result.ascension, "game_build": config.game_build,
+            "end_reason": summary["end_reason"], "outcome": scored["outcome"], "floor": scored["max_floor"],
+            "bosses_killed": result.bosses_killed, "score": scored["score"], "character": result.character,
+            "ascension": scored["ascension"], "seed": scored["seed"], "outcome_source": scored["outcome_source"],
+            "outcome_states": scored["outcome_states"], "game_build": config.game_build,
             "memory": str(config.memory_path) if config.memory_path is not None else None,
             "notes_added": None, "notes_changed": None, "reflect_cost_usd": None,
         }
@@ -270,6 +311,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--runs-dir", default="runs")
     parser.add_argument("--game-build", default="unknown", help="Spire 2 build, recorded in each run log and the ledger")
     parser.add_argument("--state-url", default="http://localhost:15526/api/v1/singleplayer", help="STS2MCP game state endpoint")
+    parser.add_argument("--compendium-url", default=HISTORY_URL,
+                        help="STS2MCP run history endpoint, the source of each run's outcome and seed")
     parser.add_argument("--memory", metavar="PATH",
                         help="note store, e.g. memory/notes.jsonl: show matching notes in game runs, then score and reflect")
     parser.add_argument("--no-reflect", action="store_true", help="with --memory: score runs but make no reflect call")
@@ -295,6 +338,7 @@ def main(argv: list[str] | None = None) -> None:
         model_factory=lambda goal: build_model(args, goal),
         screen_factory=lambda: X11Screen(args.display),
         state_fn=lambda: summarize(fetch_state(args.state_url)),
+        history_fn=lambda: fetch_history(args.compendium_url),
     )
     print(json.dumps({"stop_reason": session.stop_reason, "runs": len(session.runs)}, indent=2))
 
