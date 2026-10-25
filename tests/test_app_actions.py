@@ -141,11 +141,16 @@ def test_stop_escalates_to_sigterm(tmp_path):
 
     from sts_cua.app.procs import ProcessManager
 
+    ready = tmp_path / "ready"
+
     def stubborn(argv, cwd, env, log):
-        return subprocess.Popen(["bash", "-c", "trap '' INT; sleep 30"], start_new_session=True)
+        return subprocess.Popen(["bash", "-c", f"trap '' INT; touch {ready}; sleep 30"], start_new_session=True)
 
     procs = ProcessManager(tmp_path, launcher=stubborn, find=lambda args: [])
     procs.start("supervisor", ["x"], cwd=tmp_path)
+    deadline = time.monotonic() + 5
+    while not ready.exists() and time.monotonic() < deadline:  # SIGINT before the trap would just kill bash
+        time.sleep(0.02)
     assert procs.stop("supervisor", grace=0.5)
     assert "supervisor" in procs.stopping
     deadline = time.monotonic() + 5
