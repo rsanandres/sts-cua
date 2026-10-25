@@ -1,5 +1,7 @@
 import json
 
+from PIL import Image
+
 from sts_cua.actions import Click, Wait
 from sts_cua.loop import LoopConfig, run
 from sts_cua.models.base import Decision, ScriptedModel, Usage
@@ -213,3 +215,40 @@ def test_logs_screen_change_per_step(tmp_path, frame):
     steps = read_steps(log)
     assert "screen_diff" not in steps[0]  # nothing to compare the first screenshot with
     assert steps[1]["screen_diff"] == 0.0
+
+
+def test_stops_when_game_state_stalls_even_if_pixels_change(tmp_path):
+    # Hover tooltips change the screen each step, but the game state never moves.
+    frames = [Image.new("RGB", (64, 36), (i * 40 % 256, 0, 0)) for i in range(6)]
+    model = ScriptedModel([[Click(1, 2)]] * 20)
+    log = RunLog(tmp_path, meta={})
+    state = {"state_type": "monster", "floor": 28, "player": {"hp": 3}}
+    summary = run(model, FakeScreen(frames), log, LoopConfig(max_steps=20, settle_seconds=0, max_stalled=4),
+                  state_fn=lambda: dict(state))
+    assert summary["end_reason"] == "stalled"
+    steps = read_steps(log)
+    assert steps[-1]["error"] == "stuck: game state unchanged"
+    assert len(steps) == 5  # four acting steps after the first, all with the same state
+
+
+def test_state_change_resets_the_stall_count(tmp_path, frame):
+    hps = iter([10, 10, 10, 9, 9, 9, 8, 8, 8, 7])
+    model = ScriptedModel([[Click(1, 2)]] * 10)
+    log = RunLog(tmp_path, meta={})
+    summary = run(model, FakeScreen([Image.new("RGB", (64, 36), (i, 0, 0)) for i in range(0, 200, 20)]), log,
+                  LoopConfig(max_steps=10, settle_seconds=0, max_stalled=3, max_unchanged=100),
+                  state_fn=lambda: {"player": {"hp": next(hps)}})
+    assert summary["end_reason"] == "max_steps"
+
+
+def test_waits_and_missing_state_do_not_stall(tmp_path):
+    frames = [Image.new("RGB", (64, 36), (i, 0, 0)) for i in range(0, 200, 20)]
+    log = RunLog(tmp_path, meta={})
+    summary = run(ScriptedModel([[Wait(0)]] * 10), FakeScreen(frames), log,
+                  LoopConfig(max_steps=6, settle_seconds=0, max_stalled=2, max_idle_steps=100),
+                  state_fn=lambda: {"state_type": "map"})
+    assert summary["end_reason"] == "max_steps"
+    log = RunLog(tmp_path, meta={})
+    summary = run(ScriptedModel([[Click(1, 2)]] * 10), FakeScreen(frames), log,
+                  LoopConfig(max_steps=6, settle_seconds=0, max_stalled=2), state_fn=lambda: None)
+    assert summary["end_reason"] == "max_steps"
