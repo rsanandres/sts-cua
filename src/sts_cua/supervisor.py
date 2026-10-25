@@ -24,6 +24,7 @@ from zoneinfo import ZoneInfo
 
 from .loop import LoopConfig, run
 from .models.base import Model
+from .models.factory import add_model_args
 from .runlog import RunLog
 from .score import RunOverDetector, at_main_menu, load_states, score_run
 from .screen import Screen
@@ -184,33 +185,15 @@ def supervise(
 
 
 def build_model(args: argparse.Namespace, goal: str) -> Model:
-    """'scripted' (waits only, no API calls) or a Claude model, as in python -m sts_cua."""
-    if args.model == "scripted":
-        from .actions import Wait
-        from .models.base import ScriptedModel
+    """The model from the shared --model flags, with this run's goal (game or reset)."""
+    from .models.factory import build_model as from_flags
 
-        return ScriptedModel([[Wait(0.1)]] * args.max_steps)
-    from .models.claude import ClaudeConfig, ClaudeModel
-
-    config = ClaudeConfig(
-        model=args.model, thinking=args.thinking, effort=args.effort, history_steps=args.history_steps,
-        send_width=args.send_width, goal=goal,
-    )
-    if args.prompt_file:
-        with open(args.prompt_file, encoding="utf-8") as f:
-            config.system_prompt = f.read().strip()
-    return ClaudeModel(config)
+    return from_flags(argparse.Namespace(**{**vars(args), "goal": goal}))
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="sts_cua.supervisor", description=__doc__.splitlines()[0])
     parser.add_argument("--display", default=":99", help="X display to capture and drive")
-    parser.add_argument("--model", default="claude-haiku-5-5", help="Claude model ID, or 'scripted' for a no-model dry run")
-    parser.add_argument("--thinking", choices=["on", "off"], default="off")
-    parser.add_argument("--effort", default="low", choices=["low", "medium", "high", "xhigh", "max"])
-    parser.add_argument("--history-steps", type=int, default=8)
-    parser.add_argument("--send-width", type=int, help="shrink screenshots to this width before sending to Claude")
-    parser.add_argument("--prompt-file", help="replace the Spire system prompt")
     parser.add_argument("--daily-budget", type=float, default=2.0, help="USD per day (America/Los_Angeles), counted from runs/*/summary.json")
     parser.add_argument("--reserve", type=float, default=0.10, help="don't start a run with less than this many USD left today")
     parser.add_argument("--max-cost", type=float, help="USD cap per run (default: what is left of today's budget)")
@@ -221,8 +204,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--settle", type=float, default=1.0, help="seconds to wait after each step")
     parser.add_argument("--runs-dir", default="runs")
     parser.add_argument("--game-build", default="unknown", help="Spire 2 build, recorded in each run log and the ledger")
-    parser.add_argument("--goal", default=GAME_GOAL, help="goal for each game run")
     parser.add_argument("--state-url", default="http://localhost:15526/api/v1/singleplayer", help="STS2MCP game state endpoint")
+    add_model_args(parser)  # --model, --goal (default: GAME_GOAL), --prompt-file, ...
     args = parser.parse_args(argv)
 
     from .screen import X11Screen
@@ -232,7 +215,7 @@ def main(argv: list[str] | None = None) -> None:
         runs_dir=Path(args.runs_dir), daily_budget_usd=args.daily_budget, reserve_usd=args.reserve,
         max_cost_per_run=args.max_cost, max_runs=args.max_runs, max_steps=args.max_steps,
         max_idle_steps=args.max_idle_steps, reset_max_steps=args.reset_max_steps, settle_seconds=args.settle,
-        game_goal=args.goal, game_build=args.game_build,
+        game_goal=args.goal or GAME_GOAL, game_build=args.game_build,
         meta={"display": args.display, "prompt_file": args.prompt_file, "send_width": args.send_width},
     )
     session = supervise(
