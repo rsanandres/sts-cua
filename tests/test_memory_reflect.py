@@ -1,30 +1,13 @@
 import json
 
 import pytest
-from anthropic.types import Message
-from memory_runs import fight, screen, step, write_run
+from memory_runs import FakeClient, fight, screen, step, write_run
 
 from sts_cua.memory.reflect import MAX_ADDS, OPS_SCHEMA, apply_ops, build_request, reflect
 from sts_cua.memory.runs import load_run
 from sts_cua.memory.store import NoteStore
 
 OLD = "2026-01-01T00:00:00+00:00"
-
-
-class FakeClient:
-    def __init__(self, ops):
-        self.requests = []
-        self.messages = self
-        self.reply = Message.model_validate({
-            "id": "msg_reflect", "type": "message", "role": "assistant", "model": "claude-sonnet-5-5",
-            "content": [{"type": "text", "text": json.dumps({"ops": ops})}],
-            "stop_reason": "end_turn", "stop_sequence": None,
-            "usage": {"input_tokens": 3000, "output_tokens": 400, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0},
-        })
-
-    def create(self, **kwargs):
-        self.requests.append(kwargs)
-        return self.reply
 
 
 def setup(tmp_path):
