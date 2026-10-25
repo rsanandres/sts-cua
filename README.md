@@ -205,6 +205,22 @@ python -m sts_cua.memory reflect runs/<run> --dry-run   # print the request, no 
 - **Reflect** (`memory/reflect.py`): one call with a digest of the run (per-combat HP table, outcome, wasted or erroring steps, the agent's thoughts at key moments, the notes it was shown with their stats). It returns delta operations only: ADD (at most 3, deduped against notes with the same keys), UPDATE, DOWNVOTE, RETIRE. Cost goes to `memory_reflect.json` in the run directory.
 - **Validation gate** (`memory/score.py`): per note, loss when shown vs hidden (HP lost per combat as a share of max HP for enemy, card and strategy notes; share of wasted steps per screen visit for ui, pitfall and event notes). Utility = hidden minus shown, with a simple Welch interval. Probation becomes active when the lower bound is above 0 after 5 shown and 3 hidden units; any note is retired when the upper bound is below 0. Results go to `memory_score.json`. Fights come from `sts_cua.score.combats`, and reset runs (meta `kind: "reset"`) are neither scored nor reflected on. With `--memory`, the supervisor scores and reflects on every game run itself.
 
+## Control app
+
+One page to run everything from the PC or the phone: start and stop the stack and the local model, start and stop supervisor sessions, watch the live run and screen, read results, spend and logs, and retire notes or reflect on a run.
+
+```
+.venv/bin/python -m sts_cua.app          # http://127.0.0.1:8765, prints the token on first start
+```
+
+On Windows, `tools/windows/sts-cua-app.cmd` starts the server in WSL if it isn't answering and opens it in an Edge app window; [tools/windows/README.md](tools/windows/README.md) covers phone access through `tailscale serve`. The API is [docs/app-api.md](docs/app-api.md).
+
+- Stdlib only (`ThreadingHTTPServer`), bound to 127.0.0.1. Every `/api/` call except `/api/health` needs the token in `~/.sts-cua/app-token` (mode 600), as a Bearer header or the HttpOnly, SameSite=Strict cookie that `/login?token=...` sets. No localhost exemption, since `tailscale serve` traffic also arrives from localhost. POSTs must be JSON.
+- Fixed actions only: argv lists built from validated fields (model allowlist, clamped numbers, names matching `^[\w.-]+$`, paths kept inside `runs/`), never a command string from a request.
+- Children it starts (supervisor, vLLM, `stack_up.sh`, reflect) get pid files in `~/.sts-cua/run/`, so a restarted app still knows them, and log to `~/.sts-cua/logs/`. Processes started elsewhere are found with pgrep.
+- `tools/stack_down.sh` stops agent runs with a pattern that leaves `python -m sts_cua.app` running.
+- `src/sts_cua/app/`: `server.py` (HTTP, auth, static page), `routes.py` (endpoints), `procs.py` (processes), `files.py` (tailing logs, run dirs), `static/` (the page).
+
 ## Status
 
 Harness runs Spire 2 end to end on Raph's PC. Haiku 5.5 won the first fight of Act 1 (14 steps, $0.0056, run 20261025T164617Z). The supervisor for back-to-back full runs (`python -m sts_cua.supervisor`) is written and tested on fakes only; it has not run against the game yet.

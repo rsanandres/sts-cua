@@ -187,3 +187,20 @@ def test_notes_reach_model_and_are_logged(tmp_path, frame):
     log = RunLog(tmp_path, meta={})
     run(Reader(), FakeScreen([frame]), log, LoopConfig(max_steps=1, settle_seconds=0))
     assert "notes_shown" not in read_steps(log)[0] and seen[-1] == ""
+
+
+def test_interrupt_still_writes_summary(tmp_path, frame):
+    import json
+
+    import pytest
+
+    class Interrupted:
+        name = "interrupted"
+
+        def decide(self, obs):
+            raise KeyboardInterrupt
+
+    log = RunLog(tmp_path, meta={})
+    with pytest.raises(KeyboardInterrupt):
+        run(Interrupted(), FakeScreen([frame]), log, LoopConfig(max_steps=5, settle_seconds=0))
+    assert json.loads((log.dir / "summary.json").read_text())["end_reason"] == "interrupted"
