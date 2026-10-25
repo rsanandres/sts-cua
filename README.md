@@ -224,6 +224,20 @@ On Windows, `tools/windows/sts-cua-app.cmd` starts the server in WSL if it isn't
 - `tools/stack_down.sh` stops agent runs with a pattern that leaves `python -m sts_cua.app` running.
 - `src/sts_cua/app/`: `server.py` (HTTP, auth, static page), `routes.py` (endpoints), `procs.py` (processes), `files.py` (tailing logs, run dirs), `static/` (the page).
 
+## Video footage
+
+The project history for the video lives in [docs/devlog.md](docs/devlog.md).
+
+```
+.venv/bin/python -m sts_cua --record ...                          # also writes <run_dir>/screen.mp4 (ffmpeg x11grab, 15 fps)
+.venv/bin/python -m sts_cua.replay runs/<run>                     # replay.mp4 + highlights.md in the run dir
+.venv/bin/python -m sts_cua.replay runs/<run> --highlights-only   # highlights.md only, no ffmpeg needed
+```
+
+- `replay.mp4`: one frame per step, 1.5 s each (`--seconds-per-step`), with a bar showing step, floor, HP, gold, spend and the AI's thought, and red circles on its clicks.
+- `highlights.md`: fights started and won, floors, hits of 10+ HP, stuck streaks (3+ steps with no screen change), the end of the run, each with its time in `replay.mp4` and, for recorded runs, in `screen.mp4`.
+- Both need `ffmpeg` (`sudo apt install ffmpeg`). Every step now logs `screen_diff` (change since the previous screenshot, 0-255); older runs are recomputed from their screenshots.
+
 ## Status
 
-Harness runs Spire 2 end to end on Raph's PC. Haiku 5.5 won the first fight of Act 1 (14 steps, $0.0056, run 20261025T164617Z). The supervisor for back-to-back full runs (`python -m sts_cua.supervisor`) is written and tested on fakes only; it has not run against the game yet.
+Harness runs Spire 2 end to end on Raph's PC. Haiku 5.5 won the first fight of Act 1 (14 steps, $0.0056, run 20261025T164617Z), then went from the floor 0 map to floor 6, winning 5 fights (96 steps, $0.041, run 20261025T181542Z). The supervisor for back-to-back full runs (`python -m sts_cua.supervisor`) is written and tested on fakes only; it has not run against the game yet.

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 
 from .loop import LoopConfig, run
@@ -29,6 +30,8 @@ def main(argv: list[str] | None = None) -> None:
     add_model_args(parser)
     parser.add_argument("--memory", metavar="PATH",
                         help="note store, e.g. memory/notes.jsonl: show matching lessons from earlier runs each step")
+    parser.add_argument("--record", action="store_true",
+                        help="record the display to <run_dir>/screen.mp4 with ffmpeg (for video footage)")
     args = parser.parse_args(argv)
 
     screen = X11Screen(args.display)
@@ -57,9 +60,15 @@ def main(argv: list[str] | None = None) -> None:
         from .state import fetch_state, summarize
 
         state_fn = lambda: summarize(fetch_state(args.state_url))  # noqa: E731
-    summary = run(model, screen, log, LoopConfig(
-        max_steps=args.max_steps, max_cost_usd=args.max_cost, settle_seconds=args.settle,
-    ), state_fn=state_fn, notes_fn=notes_fn)
+    recording = contextlib.nullcontext()
+    if args.record:
+        from .record import ScreenRecorder
+
+        recording = ScreenRecorder(args.display, screen.size, log.dir)
+    with recording:
+        summary = run(model, screen, log, LoopConfig(
+            max_steps=args.max_steps, max_cost_usd=args.max_cost, settle_seconds=args.settle,
+        ), state_fn=state_fn, notes_fn=notes_fn)
     print(json.dumps({"run_dir": str(log.dir), **summary}, indent=2))
 
 

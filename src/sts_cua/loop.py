@@ -59,12 +59,14 @@ def run(
     try:
         for step in range(1, config.max_steps + 1):
             screenshot = screen.capture()
-            if previous is not None and history and any(not isinstance(a, Wait) for a in history[-1].actions):
-                if screen_diff(previous, screenshot) < config.unchanged_threshold:
+            diff = screen_diff(previous, screenshot) if previous is not None else None
+            if diff is not None and history and any(not isinstance(a, Wait) for a in history[-1].actions):
+                if diff < config.unchanged_threshold:
                     history[-1].unchanged = True
                     unchanged += 1
                     if unchanged >= config.max_unchanged:
-                        log.step(step, screenshot, None, [], error="stuck: screen unchanged", state=state_fn() if state_fn else None)
+                        log.step(step, screenshot, None, [], error="stuck: screen unchanged",
+                                 state=state_fn() if state_fn else None, screen_diff=diff)
                         end_reason = "stuck"
                         break
                 else:
@@ -73,14 +75,15 @@ def run(
             state = state_fn() if state_fn else None
             reason = stop_fn(state) if stop_fn else None
             if reason:
-                log.step(step, screenshot, None, [], state=state)
+                log.step(step, screenshot, None, [], state=state, screen_diff=diff)
                 end_reason = reason
                 break
             notes, notes_shown = notes_fn(state) if notes_fn else ("", None)
             try:
                 decision = model.decide(Observation(step, screenshot, history, notes=notes))
             except Exception as exc:  # API or adapter failure: log it and keep going, up to max_errors
-                log.step(step, screenshot, None, [], error=f"model: {exc!r}", state=state, notes_shown=notes_shown)
+                log.step(step, screenshot, None, [], error=f"model: {exc!r}", state=state, notes_shown=notes_shown,
+                         screen_diff=diff)
                 errors += 1
                 if errors >= config.max_errors:
                     end_reason = "model_errors"
@@ -96,7 +99,7 @@ def run(
                     break
                 executed.append(action)
 
-            log.step(step, screenshot, decision, executed, error, state=state, notes_shown=notes_shown)
+            log.step(step, screenshot, decision, executed, error, state=state, notes_shown=notes_shown, screen_diff=diff)
             history.append(HistoryEntry(step, decision.thought, executed))
 
             if decision.done:
