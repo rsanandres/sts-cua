@@ -17,6 +17,8 @@ the new entry is known exactly); otherwise from the logged states (score.score_r
 With --memory, each game run sees matching notes from the store (a fresh probation seed
 per run, in meta.json["memory"]); after it, the run is scored against the store and one
 reflect call (sts_cua.memory.reflect) edits it. Reset runs get no notes and no reflect.
+SupervisorConfig.memory_frozen (used by sts_cua.eval) shows the notes but skips scoring
+and reflect, so a frozen snapshot never changes.
 
 The daily budget is the sum of cost_usd in runs/*/summary.json whose ended_at falls on
 today's date in America/Los_Angeles, plus the cost_usd of runs/*/memory_reflect.json by
@@ -88,6 +90,7 @@ class SupervisorConfig:
     memory_path: Path | None = None  # note store; None: no memory
     reflect: bool = True  # with memory: one reflect call after each game run
     reflect_reserve_usd: float = 0.05  # expected reflect cost: kept out of a run's cap, and needed to reflect
+    memory_frozen: bool = False  # with memory: show notes but never score or reflect (the store stays unchanged)
     history_retries: int = 3  # run-history polls after a run that ended on the game-over screen or a menu
     history_retry_seconds: float = 2.0
 
@@ -163,7 +166,8 @@ def supervise(
                 sleep(config.state_retry_seconds)
         return None
 
-    reflecting = config.memory_path is not None and config.reflect
+    learning = config.memory_path is not None and not config.memory_frozen
+    reflecting = learning and config.reflect
 
     def loop_config(max_steps: int, budget_left: float) -> LoopConfig:
         cap = budget_left if config.max_cost_per_run is None else min(config.max_cost_per_run, budget_left)
@@ -285,7 +289,7 @@ def supervise(
             "memory": str(config.memory_path) if config.memory_path is not None else None,
             "notes_added": None, "notes_changed": None, "reflect_cost_usd": None,
         }
-        if config.memory_path is not None:
+        if learning:
             entry.update(learn(log.dir))
         with (runs_dir / "ledger.jsonl").open("a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")

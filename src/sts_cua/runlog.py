@@ -39,10 +39,13 @@ class RunLog:
         state: dict | None = None,
         notes_shown: list[str] | None = None,
         waiting: str | None = None,
+        screen_diff: float | None = None,
     ) -> None:
         shot_name = f"screenshots/step_{step:04d}.png"
         screenshot.save(self.dir / shot_name)
         record = {"step": step, "time": datetime.now(timezone.utc).isoformat(), "screenshot": shot_name}
+        if screen_diff is not None:
+            record["screen_diff"] = round(screen_diff, 3)  # vs the previous step's screenshot, 0-255
         if decision is not None:
             u = decision.usage
             record.update(

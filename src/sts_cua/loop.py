@@ -79,13 +79,15 @@ def run(
             screenshot = screen.capture()
             state = state_fn() if state_fn else None
             waiting = waiting_fn(state) if waiting_fn else None
-            if previous is not None and history and any(not isinstance(a, Wait) for a in history[-1].actions):
-                if screen_diff(previous, screenshot) < config.unchanged_threshold:
+            diff = screen_diff(previous, screenshot) if previous is not None else None
+            if diff is not None and history and any(not isinstance(a, Wait) for a in history[-1].actions):
+                if diff < config.unchanged_threshold:
                     history[-1].unchanged = True
                     if not waiting:  # clicks that change nothing are normal while the teammate plays
                         unchanged += 1
                     if unchanged >= config.max_unchanged:
-                        log.step(step, screenshot, None, [], error="stuck: screen unchanged", state=state, waiting=waiting)
+                        log.step(step, screenshot, None, [], error="stuck: screen unchanged", state=state,
+                                 waiting=waiting, screen_diff=diff)
                         end_reason = "stuck"
                         break
                 else:
@@ -93,12 +95,13 @@ def run(
                     last_progress = clock()
             previous = screenshot
             if config.max_idle_seconds is not None and clock() - last_progress >= config.max_idle_seconds:
-                log.step(step, screenshot, None, [], error="idle timeout: no progress", state=state, waiting=waiting)
+                log.step(step, screenshot, None, [], error="idle timeout: no progress", state=state,
+                         waiting=waiting, screen_diff=diff)
                 end_reason = "idle_timeout"
                 break
             reason = stop_fn(state) if stop_fn else None
             if reason:
-                log.step(step, screenshot, None, [], state=state, waiting=waiting)
+                log.step(step, screenshot, None, [], state=state, waiting=waiting, screen_diff=diff)
                 end_reason = reason
                 break
             notes, notes_shown = notes_fn(state) if notes_fn else ("", None)
@@ -115,7 +118,7 @@ def run(
                         decision.rule = ruling.rule
             except Exception as exc:  # API or adapter failure: log it and keep going, up to max_errors
                 log.step(step, screenshot, None, [], error=f"model: {exc!r}", state=state, notes_shown=notes_shown,
-                         waiting=waiting)
+                         waiting=waiting, screen_diff=diff)
                 errors += 1
                 if errors >= config.max_errors:
                     end_reason = "model_errors"
@@ -134,7 +137,8 @@ def run(
                     break
                 executed.append(action)
 
-            log.step(step, screenshot, decision, executed, error, state=state, notes_shown=notes_shown, waiting=waiting)
+            log.step(step, screenshot, decision, executed, error, state=state, notes_shown=notes_shown,
+                     waiting=waiting, screen_diff=diff)
             history.append(HistoryEntry(step, decision.thought, executed))
 
             if decision.done:

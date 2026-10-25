@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import subprocess
 import threading
 import urllib.error
@@ -14,7 +15,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from sts_cua.app.procs import ProcessManager
+from sts_cua.app.procs import ProcessManager, pgrep
 from sts_cua.app.routes import AppConfig
 from sts_cua.app.server import make_server
 from sts_cua.memory import NoteStore
@@ -148,6 +149,20 @@ class Running:
         return self.server.app
 
 
+def own_pgrep(args: list[str]) -> list[int]:
+    """pgrep limited to this test process's children, so other test runs on the machine don't leak in."""
+    me = os.getpid()
+    found = []
+    for pid in pgrep(args):
+        try:
+            stat = Path(f"/proc/{pid}/stat").read_text()
+        except OSError:
+            continue
+        if int(stat[stat.rfind(")") + 2:].split()[1]) == me:
+            found.append(pid)
+    return found
+
+
 def start_server(tmp_path: Path, capture=None) -> Running:
     repo = make_repo(tmp_path)
     state_dir = tmp_path / "state"
@@ -157,7 +172,7 @@ def start_server(tmp_path: Path, capture=None) -> Running:
         vllm="/opt/vllm/bin/vllm", nvidia_smi=("/nonexistent/nvidia-smi",), shutdown_delay=0.05,
     )
     launcher = FakeLauncher()
-    procs = ProcessManager(state_dir, launcher=launcher)
+    procs = ProcessManager(state_dir, launcher=launcher, find=own_pgrep)
     kwargs = {"clock": lambda: NOW}
     if capture is not None:
         kwargs["capture"] = capture

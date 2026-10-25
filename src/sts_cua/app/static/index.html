@@ -219,6 +219,21 @@
         <p id="runs-empty" class="muted" hidden>No runs yet.</p>
         <button type="button" id="runs-more" class="ghost" hidden>Show more</button>
       </div>
+      <div class="card" id="evals-card">
+        <div class="table-head">
+          <h2>Evals</h2>
+          <button type="button" id="evals-refresh" class="ghost small">Refresh</button>
+        </div>
+        <p class="muted small">Memory A/B experiments from <code>python -m sts_cua.eval</code>. Click one for its report.</p>
+        <table id="evals-table" class="cards">
+          <thead><tr>
+            <th>Name</th><th>Mode</th><th>Comparison</th><th class="n">Runs</th><th class="n">Cost</th><th class="n">p</th><th>Status</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+        <p id="evals-empty" class="muted" hidden>No evaluations yet.</p>
+        <div id="eval-detail" class="eval-detail" hidden></div>
+      </div>
     </div>
 
     <div id="replay" hidden>

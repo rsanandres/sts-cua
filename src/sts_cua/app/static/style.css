@@ -283,3 +283,9 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+/* Evals (Results tab) */
+.eval-detail { margin-top: 0.75rem; border-top: 1px solid var(--border); padding-top: 0.5rem; }
+.eval-detail td, #evals-table td { overflow-wrap: anywhere; }
+.eval-detail ul { margin: 0.3rem 0 0; padding-left: 1.2rem; overflow-wrap: anywhere; }
+tr.selected { background: var(--surface-2); }

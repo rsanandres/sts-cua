@@ -190,6 +190,7 @@ With `--memory PATH`, each game run gets a fresh `Retriever` over the store (a n
 - `src/sts_cua/supervisor.py`: the session loop and budget accounting.
 - `src/sts_cua/score.py`: outcome, score and per-combat breakdown from a run's logged states (`load_states(run_dir)`), and the stop check (`RunOverDetector`).
 - `src/sts_cua/history.py`: read-only client for the mod's run history, and `find_run`, which picks a finished run's entry.
+- `src/sts_cua/eval.py`, `src/sts_cua/stats.py`: the memory A/B evaluation and its tests (see "Memory A/B evaluation").
 
 ## Memory across runs
 
@@ -208,6 +209,33 @@ python -m sts_cua.memory reflect runs/<run> --dry-run   # print the request, no 
 - **Delivery:** the notes go into the per-step user message, after the cached tools and system prompt, labelled as lessons from earlier runs.
 - **Reflect** (`memory/reflect.py`): one call with a digest of the run (per-combat HP table, outcome, wasted or erroring steps, the agent's thoughts at key moments, the notes it was shown with their stats). It returns delta operations only: ADD (at most 3, deduped against notes with the same keys), UPDATE, DOWNVOTE, RETIRE. Cost goes to `memory_reflect.json` in the run directory.
 - **Validation gate** (`memory/score.py`): per note, loss when shown vs hidden (HP lost per combat as a share of max HP for enemy, card and strategy notes; share of wasted steps per screen visit for ui, pitfall and event notes). Utility = hidden minus shown, with a simple Welch interval. Probation becomes active when the lower bound is above 0 after 5 shown and 3 hidden units; any note is retired when the upper bound is below 0. Results go to `memory_score.json`. Fights come from `sts_cua.score.combats`, and reset runs (meta `kind: "reset"`) are neither scored nor reflected on. With `--memory`, the supervisor scores and reflects on every game run itself.
+
+## Memory A/B evaluation
+
+Does memory help? No memory vs a frozen snapshot of the note store, same character, A0, scored by the run score (docs/learning.md).
+
+```
+python -m sts_cua.eval snapshot                     # memory/notes.jsonl -> memory/frozen/notes-<date>.jsonl, read-only
+python -m sts_cua.eval plan ab1 --arms none frozen:memory/frozen/notes-20261025.jsonl \
+    --seeds seeds/eval.txt --model claude-haiku-5-5 --thinking off --daily-budget 2 --max-cost 0.5 --game-build v0.107.1
+python -m sts_cua.eval plan ab2 --arms none frozen:... --runs-per-arm 20 ...   # no seeds: unpaired
+python -m sts_cua.eval run ab1 --display :99        # plays what is left; run it again tomorrow to resume
+python -m sts_cua.eval report ab1                   # per-arm stats and the test, also in the app's Results tab
+```
+
+- **Paired, with seeds** (one per line in the seed file): each seed is played once per arm. The goal tells the agent to start a Custom run (Singleplayer > Custom), pick the character, set Ascension 0, leave modifiers off and type the seed into the seed field. The supervisor reads each run's seed from the run history, a run on the wrong seed (or ascension or character) is invalid and retried (`--max-attempts`, default 2), and a valid run whose seed couldn't be read gets a `seed_unverified` warning. Test: Wilcoxon signed-rank on the per-seed score difference (second arm minus first).
+- **Unpaired, without seeds:** standard runs with the arms interleaved in time. Test: Mann-Whitney U. The report says it is unpaired; seed variance stays in, so it needs more runs for the same power.
+- Arm order alternates AB, BA, AB, ... so neither arm always goes first. Win rate is secondary: exact McNemar on discordant pairs (paired) or Fisher's exact test (unpaired). Effect size is the rank-biserial correlation (+1: every run of the second arm beats the first). The tests are pure Python (`src/sts_cua/stats.py`): exact p-values up to 50 pairs or 60 runs, ties included (exact conditional on the ranks), else a normal approximation with tie and continuity corrections.
+- Every run goes through `supervisor.supervise` into `runs/`, so resets, scoring, the ledger and the daily budget work as in any session (`meta.json["eval"]` names the experiment, slot and arm). A run starts only when `--max-cost` is still left today, so the budget never cuts one short. When the budget is spent the eval stops; `run` again skips finished slots. It also stops after 3 runs in a row that never got into a run (for example when Custom mode is locked; plan an unpaired eval then).
+- Frozen means the notes are shown but the run is never scored against the store and never reflected on (`SupervisorConfig.memory_frozen`). The plan stores the snapshot's sha256, and the eval stops if the file changes. The no-memory arm writes nothing.
+- `plan` refuses evaluation seeds that already appear as the seed of a ledger run that used memory (training runs), plus any in `--training-seeds FILE`.
+- Files: `runs/evals/<name>/plan.json` (arms, seeds, model flags, budget, the run order), `results.jsonl` (one line per finished game run, valid or not, with score, floor, outcome, cost and the seed played), `report.json` (rewritten after every run).
+
+Seeds in Spire 2 (read 2026-10-25):
+- The Spire 2 wiki's Custom Mode page says custom runs "can be started using a random seed, or by inputting a custom seed", set the Ascension level and take any number of modifiers, and that Custom Mode unlocks after beating Act 3 three times ([wiki](https://slaythespire.wiki.gg/wiki/Slay_the_Spire_2:Custom_Mode), marked under construction).
+- SearchTheSpire: copy a seed, "go to singleplayer and start a custom run", which has "a seed field". Seeds assume a fully unlocked profile, because "locked cards, relics and characters shrink the pools the game draws from", and the main and beta branches generate different runs from the same seed ([searchthespire.app](https://searchthespire.app/)). Players share 10-character seeds such as `JDZCSFVCT5` for custom runs ([Steam discussion](https://steamcommunity.com/app/2868840/discussions/0/798967628136784876/)).
+- STS2MCP (main @ 55e0648) can embark with a seed (`menu_select` with `seed`, `charSelect.Lobby.SetSeed`) only where the character select has a lobby; standard singleplayer returns "Seeded embark is not supported for standard singleplayer from this API" (`McpMod.Actions.cs`, `docs/raw-full.md`). It is a POST endpoint, which the harness never calls, so the agent types the seed itself. The compendium's run history and `current_run` report each run's `seed` (read-only).
+- **Unverified, check on the PC:** that the agent's modded profile has Custom Mode unlocked (modded profiles are separate saves); where the seed field is and what it accepts; that a seed gives the same map, fights and rewards in both arms (unlocks earned during the eval change the pools, so keep the profile's unlocks fixed, ideally fully unlocked); whether custom runs keep Neow's bonus without modifiers; and that `seed` in the run history matches the typed seed.
 
 ## Co-op with Raph
 
@@ -253,6 +281,20 @@ On Windows, `tools/windows/sts-cua-app.cmd` starts the server in WSL if it isn't
 - `tools/stack_down.sh` stops agent runs with a pattern that leaves `python -m sts_cua.app` running.
 - `src/sts_cua/app/`: `server.py` (HTTP, auth, static page), `routes.py` (endpoints), `procs.py` (processes), `files.py` (tailing logs, run dirs), `static/` (the page).
 
+## Video footage
+
+The project history for the video lives in [docs/devlog.md](docs/devlog.md).
+
+```
+.venv/bin/python -m sts_cua --record ...                          # also writes <run_dir>/screen.mp4 (ffmpeg x11grab, 15 fps)
+.venv/bin/python -m sts_cua.replay runs/<run>                     # replay.mp4 + highlights.md in the run dir
+.venv/bin/python -m sts_cua.replay runs/<run> --highlights-only   # highlights.md only, no ffmpeg needed
+```
+
+- `replay.mp4`: one frame per step, 1.5 s each (`--seconds-per-step`), with a bar showing step, floor, HP, gold, spend and the AI's thought, and red circles on its clicks.
+- `highlights.md`: fights started and won, floors, hits of 10+ HP, stuck streaks (3+ steps with no screen change), the end of the run, each with its time in `replay.mp4` and, for recorded runs, in `screen.mp4`.
+- Both need `ffmpeg` (`sudo apt install ffmpeg`). Every step now logs `screen_diff` (change since the previous screenshot, 0-255); older runs are recomputed from their screenshots.
+
 ## Status
 
-Harness runs Spire 2 end to end on Raph's PC. Haiku 5.5 won the first fight of Act 1 (14 steps, $0.0056, run 20261025T164617Z). The supervisor for back-to-back full runs (`python -m sts_cua.supervisor`) is written and tested on fakes only; it has not run against the game yet.
+Harness runs Spire 2 end to end on Raph's PC. Haiku 5.5 won the first fight of Act 1 (14 steps, $0.0056, run 20261025T164617Z), then went from the floor 0 map to floor 6, winning 5 fights (96 steps, $0.041, run 20261025T181542Z). The supervisor for back-to-back full runs (`python -m sts_cua.supervisor`) is written and tested on fakes only; it has not run against the game yet.

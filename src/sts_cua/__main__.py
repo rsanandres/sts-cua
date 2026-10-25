@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 
 from . import coop
@@ -35,6 +36,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     add_model_args(parser)
     parser.add_argument("--memory", metavar="PATH",
                         help="note store, e.g. memory/notes.jsonl: show matching lessons from earlier runs each step")
+    parser.add_argument("--record", action="store_true",
+                        help="record the display to <run_dir>/screen.mp4 with ffmpeg (for video footage)")
     g = parser.add_argument_group("co-op")
     g.add_argument("--coop", action="store_true",
                    help="play co-op with a human teammate who hosts; start once this game shows the host's lobby")
@@ -71,7 +74,14 @@ def main(argv: list[str] | None = None) -> None:
             state_fn = lambda: coop.summarize(coop.fetch_state(args.state_url))  # noqa: E731
         else:
             state_fn = lambda: summarize(fetch_state(args.state_url))  # noqa: E731
-    summary = run(model, screen, log, loop_config(args), state_fn=state_fn, notes_fn=notes_fn, **coop_hooks(args))
+    recording = contextlib.nullcontext()
+    if args.record:
+        from .record import ScreenRecorder
+
+        recording = ScreenRecorder(args.display, screen.size, log.dir)
+    with recording:
+        summary = run(model, screen, log, loop_config(args), state_fn=state_fn, notes_fn=notes_fn,
+                      **coop_hooks(args))
     print(json.dumps({"run_dir": str(log.dir), **summary}, indent=2))
 
 

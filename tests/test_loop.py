@@ -204,3 +204,12 @@ def test_interrupt_still_writes_summary(tmp_path, frame):
     with pytest.raises(KeyboardInterrupt):
         run(Interrupted(), FakeScreen([frame]), log, LoopConfig(max_steps=5, settle_seconds=0))
     assert json.loads((log.dir / "summary.json").read_text())["end_reason"] == "interrupted"
+
+
+def test_logs_screen_change_per_step(tmp_path, frame):
+    model = ScriptedModel([[Click(1, 2)], [Click(1, 2)]])
+    log = RunLog(tmp_path, meta={})
+    run(model, FakeScreen([frame]), log, LoopConfig(max_steps=2, settle_seconds=0))
+    steps = read_steps(log)
+    assert "screen_diff" not in steps[0]  # nothing to compare the first screenshot with
+    assert steps[1]["screen_diff"] == 0.0

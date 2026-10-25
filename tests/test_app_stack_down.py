@@ -17,12 +17,14 @@ AGENT_RUNS = [
     "python3.12 -m sts_cua.supervisor",
     "python -m sts_cua.memory reflect runs/20261025T164617Z",
     "python -m sts_cua",
+    "python -m sts_cua.eval run memory-ab --display :99",
 ]
 NOT_AGENT = [
     "python -m sts_cua.app",
     "/home/raph/sts-cua/.venv/bin/python -m sts_cua.app --port 8765",
     "python -m sts_cua.apps",
     "python -m sts_cua_other",
+    "python -m sts_cua.evaluate",
     "vim src/sts_cua/supervisor.py",
     "bash tools/stack_down.sh",
 ]
