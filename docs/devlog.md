@@ -77,7 +77,18 @@ Make footage from any run with `python -m sts_cua.replay runs/<run>` (see the RE
   - Floor 6: Mawler, down to 12 HP (18 after healing). Took Thunderclap.
 - Floor 5 was the merchant. It looped for 7 steps between the tent's Proceed and the shop's back arrow, bought nothing, and didn't notice it had hit its floor 5 goal.
 - Weak play: it never used the Fire Potion, and it often ended turns with Defends still in hand, which is why HP dropped so far.
-- Next: the same floors on Sonnet 5.5, for comparison.
+
+### Sonnet takes over at 18 HP
+
+- Run `20261025T183740Z`: Sonnet 5.5 (thinking on, effort low) continued Haiku's run from the floor 6 rewards screen at 18/80 HP, aiming for floor 11. It died on floor 8: 46 steps, $0.29, 6.5 minutes.
+- At the floor 7 merchant it had 163 gold and 18 HP. It bought Whirlwind and a potion and paid to remove a Strike, but didn't heal.
+- It looped between the merchant tent and the shop for about 12 steps, just like Haiku.
+- Floor 8 was three Raiders. It dropped to 1 HP on turn 1, died on step 33, and never drank a potion.
+- After the death it clicked through screens nobody had seen yet (game over, Timeline, Epoch unlock, a story screen) and said DONE on the Timeline.
+- Per step: Sonnet $0.0063 with 147 output tokens, Haiku $0.00043 with 337. Sonnet writes less, but each token costs about 20 times as much.
+- Not a fair comparison: the two models played different floors from different HP. Next is a fresh run from floor 0 for each model.
+- Problems both models share: leaving the shop, never using potions, and the screens after a run. The first two look like missing tutorial knowledge, not strategy.
+- Replays exist for both runs (`replay.mp4` and `highlights.md` in each run folder): 2:22 for Haiku, 1:07 for Sonnet.
 
 ## Clip ideas
 
@@ -86,4 +97,6 @@ Make footage from any run with `python -m sts_cua.replay runs/<run>` (see the RE
 - The first fight won (`20261025T164617Z`).
 - Mawler taking it to 12 HP (`20261025T181542Z`).
 - The merchant loop (`20261025T181542Z`, steps 69-75).
+- Sonnet starting at 18 HP, spending its gold on a card instead of healing, then dying on floor 8 with two potions unused (`20261025T183740Z`).
+- Both models getting lost leaving the merchant.
 - Haiku vs Sonnet on the same floors, with the cost per floor.
