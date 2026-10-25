@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sts-cua</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, sans-serif; margin: 2rem 1rem; max-width: 40rem; }
+  pre { white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>sts-cua control app</h1>
+<p>Placeholder page. The API is described in <code>docs/app-api.md</code>.</p>
+<pre id="status">loading /api/status...</pre>
+<script>
+fetch("/api/status", {credentials: "same-origin"})
+  .then(r => r.json())
+  .then(d => { document.getElementById("status").textContent = JSON.stringify(d, null, 2); })
+  .catch(e => { document.getElementById("status").textContent = String(e); });
+</script>
+</body>
+</html>
