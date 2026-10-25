@@ -70,6 +70,29 @@ Limits:
 
 ## Model
 
+### Stronger options (researched 2026-10-25)
+
+Qwen3-VL-8B below was the first pick, and it's too weak for Spire. Sizes are GiB from the Hugging Face API. Benchmarks are as published, mostly by each model's own authors.
+
+| Mode | Model | Checkpoint (GiB) | Published scores | License | Notes |
+|---|---|---|---|---|---|
+| Solo (~20 GiB free) | **Qwen3.8-27B** (Aug 2026, 27.78B dense) | unsloth UD-Q4_K_XL 16.35 + mmproj 0.86 ([HF](https://huggingface.co/unsloth/Qwen3.8-27B-GGUF)) | OSWorld-Verified 84.3, AndroidWorld 81.9 ([model card](https://huggingface.co/Qwen/Qwen3.8-27B)) | Apache-2.0 | Thinking is on by default; turn it off per request with `chat_template_kwargs: {"enable_thinking": false}`. The vLLM 4-bit builds are 19.6-20.4 GiB, so use llama.cpp |
+| Solo, A/B against the above | **Holo4-27B** (Sep 2026, fine-tune of Qwen3.8-27B) | q4_k_m 15.72 + 0.86 ([HF](https://huggingface.co/Hcompany/Holo4-27B-GGUF)) | OSWorld 85.2, OSWorld 2.0 61.7 (Qwen3.8-27B: 48.0), AndroidWorld 85.1, at about a third of the base model's cost per task ([H Company](https://hcompany.ai/newsroom/holo4)) | CC BY-NC 4.0 (HF metadata) | Same architecture as Qwen3.8-27B, so it serves the same way |
+| Co-op (~13 GiB free) | **UI-Venus-2-9B** (Aug 2026, from Qwen3.5-9B) | bartowski Q8_0 8.89 + mmproj ([HF](https://huggingface.co/bartowski/UI-Venus-2-9B-GGUF)) | OSWorld-Verified 70.8, ScreenSpot-Pro 73.0, AndroidWorld 80.2 ([model card](https://huggingface.co/inclusionAI/UI-Venus-2-9B)) | "Pending final confirmation" | Card: reasoning on for agent tasks, off with temperature 0 for grounding. Coordinate format not stated on the card; check the UI-Venus repo's parsers |
+| Co-op, tight | Qwen3.8-27B UD-IQ3_XXS | 10.18 + 0.86 | Scores above are for full precision | Apache-2.0 | Fits but leaves almost no headroom. Untested at 3 bits for clicking; a 4-bit AWQ build of Qwen3.5-27B scored 60.9 on ScreenSpot-Pro against 70.3 at full precision, which the authors put down to quantization and prompt format ([2604.15376](https://arxiv.org/abs/2604.15376)) |
+
+Limits on what these numbers mean:
+- **The benchmarks mostly measure clicking.** OSWorld and AndroidWorld test operating apps from screenshots. Spire is hard because of strategy, and there no local model has evidence yet. In AgenticSTS (Spire 2, A0, text state), Qwen 3.6-27B won 0 of 5 runs, while Gemini 3.1 Pro won 3 of 10, or 6 of 10 with memory ([2607.02255](https://arxiv.org/abs/2607.02255)).
+- **Splitting the work is the design with evidence.** AgenticSTS made a median of 67 strategic calls per run and resolved roughly 500 routine decisions mechanically or with a fast tier. Here that means:
+  - The co-op rules (`rules.py`) handle routine moves.
+  - A local model or Haiku handles combat.
+  - Sonnet handles rewards, map, shop, events and bosses.
+  - Claude's decisions become fine-tuning data for the local model.
+- **Not worth it now: offloading experts to system RAM.** Big MoE models (Qwen3.5-122B-A10B, GLM-4.6V) run with llama.cpp expert offload, but we estimate 6-22 s per step on this PC from published 4080/4090 figures, for a few benchmark points. Revisit with 96 GB+ RAM.
+- **Measure before switching.** Run each candidate on fixed Spire click targets (`tools/click_target.py` style) and a few combats, then compare hit rate, latency and floors reached.
+
+### Current adapter: Qwen3-VL-8B
+
 | Option | Weights | Click coordinates | Image tokens at 1280x720 | Notes |
 |---|---|---|---|---|
 | **Qwen3-VL-8B-Instruct-FP8 on vLLM** (pick) | 10.59 GB | 0-1000 relative ([cookbook](https://github.com/QwenLM/Qwen3-VL/blob/main/cookbooks/computer_use.ipynb)) | 880 (resized to 1280x704, 32 px patches) | Official checkpoint, Apache-2.0 ([HF](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-FP8)) |
