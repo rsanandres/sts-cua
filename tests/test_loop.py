@@ -71,3 +71,26 @@ def test_model_errors_are_logged_then_stop(tmp_path, frame):
     summary = run(Broken(), FakeScreen([frame]), log, LoopConfig(max_steps=10, settle_seconds=0, max_errors=2))
     assert summary["end_reason"] == "model_errors"
     assert "api down" in read_steps(log)[0]["error"]
+
+
+def test_stops_when_model_says_done(tmp_path, frame):
+    class Finisher:
+        name = "finisher"
+
+        def decide(self, obs):
+            if obs.step == 2:
+                return Decision(thought="DONE: on the map", actions=[], done=True)
+            return Decision(thought="click", actions=[Click(1, 1)])
+
+    log = RunLog(tmp_path, meta={})
+    summary = run(Finisher(), FakeScreen([frame]), log, LoopConfig(max_steps=10, settle_seconds=0))
+    assert summary["end_reason"] == "done"
+    assert summary["steps"] == 2
+
+
+def test_waiting_counts_as_idle(tmp_path, frame):
+    model = ScriptedModel([[Wait(0)]] * 10)
+    log = RunLog(tmp_path, meta={})
+    summary = run(model, FakeScreen([frame]), log, LoopConfig(max_steps=10, settle_seconds=0, max_idle_steps=3))
+    assert summary["end_reason"] == "idle"
+    assert summary["steps"] == 3

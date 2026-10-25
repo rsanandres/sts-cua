@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
+from .actions import Wait
 from .models.base import HistoryEntry, Model, Observation
 from .runlog import RunLog
 from .screen import Screen
@@ -49,8 +50,12 @@ def run(model: Model, screen: Screen, log: RunLog, config: LoopConfig | None = N
         log.step(step, screenshot, decision, executed, error)
         history.append(HistoryEntry(step, decision.thought, executed))
 
+        if decision.done:
+            end_reason = "done"
+            break
         errors = errors + 1 if error else 0
-        idle = 0 if executed else idle + 1
+        # Waiting doesn't count as progress: a model that only waits is stuck or finished.
+        idle = 0 if any(not isinstance(a, Wait) for a in executed) else idle + 1
         if errors >= config.max_errors:
             end_reason = "action_errors"
             break

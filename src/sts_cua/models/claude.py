@@ -10,6 +10,7 @@ Docs: https://platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use
 from __future__ import annotations
 
 import base64
+import re
 import io
 import math
 from dataclasses import dataclass
@@ -39,7 +40,9 @@ Keyboard shortcuts (use the key action; key names are lowercase):
 - m: open or close the map
 - a / s / d / x: draw pile / discard pile / deck / exhaust pile
 
-Prefer a shortcut when one fits; click for everything else. If the screen is still animating or loading, use wait instead of acting."""
+Prefer a shortcut when one fits; click for everything else. If the screen is still animating or loading, use wait instead of acting.
+
+When the goal is complete, don't take any action: reply with the word DONE and one line saying what you see."""
 
 _THOUGHT_INSTRUCTION = "Before acting, write one or two short sentences saying what you see and why you are taking this action."
 _NO_THOUGHT_INSTRUCTION = "Reply with the action only, no explanation."
@@ -177,9 +180,11 @@ class ClaudeModel:
         if skipped:
             thought = (thought + f" [skipped unsupported: {', '.join(skipped)}]").strip()
         raw = response.model_dump(mode="json") if hasattr(response, "model_dump") else None
+        done = not actions and not skipped and re.search(r"\bDONE\b", thought) is not None
         return Decision(
             thought=thought,
             actions=actions,
+            done=done,
             reasoning="\n\n".join(reasoning),
             stop_reason=response.stop_reason,
             usage=usage,

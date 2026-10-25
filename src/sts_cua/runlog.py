@@ -46,6 +46,7 @@ class RunLog:
                 thought=decision.thought,
                 reasoning=decision.reasoning,
                 stop_reason=decision.stop_reason,
+                done=decision.done,
                 proposed=[action_to_dict(a) for a in decision.actions],
                 usage={
                     "input_tokens": u.input_tokens,

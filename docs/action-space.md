@@ -22,6 +22,7 @@ Every step in the run log gets one of these labels, so we can count inspects per
 | Arrow keys | Move the highlight in menus | Navigation | confirmed (keybind) |
 | Hover a relic, potion, power or keyword | Tooltip | Inspect | unverified |
 | `wait` | Let an animation finish | None | harness action |
+| Reply `DONE` with no action | Tell the harness the goal is reached; the run stops | None | harness action |
 
 ## Main menu (confirmed)
 
@@ -35,17 +36,24 @@ Every step in the run log gets one of these labels, so we can count inspects per
 
 ## Character select and run start
 
-| Element | Kind | Status |
-|---|---|---|
-| Character portrait | Commit | unverified |
-| Ascension level up/down | Commit | unverified; fix it per experiment |
-| Embark / start | Commit | unverified |
-| Opening choice, if the run starts with one (Spire 2's save data mentions "ancients") | Commit | unverified |
+Seen in run 20261025T085110Z (Haiku, Profile 3). On a fresh profile, Singleplayer goes straight to character select with no mode submenu.
+
+| Element | Where (1280x720) | Kind | Status |
+|---|---|---|---|
+| The Ironclad (default, highlighted): 80 HP, 99 gold, Burning Blood | | Inspect | confirmed |
+| Other four characters | | Locked on a fresh profile | confirmed |
+| Confirm checkmark | ~1225,518 | Commit | confirmed |
+| "Enable Tutorials?" dialog (first run on a profile): No / Yes | ~528,482 / ~752,482 | Commit | confirmed; the agent picks No |
+| Ascension level | | Commit | not yet seen (locked on a fresh profile?) |
+| Opening choice, if the run starts with one (Spire 2's save data mentions "ancients") | | Commit | not yet seen |
 
 ## Map
 
+Act 1 is "Overgrowth". The top bar shows HP, gold, 3 potion slots, floor number, a run timer and deck size (10 cards at the start). A Legend panel sits on the right.
+
 | Element | Kind | Status |
 |---|---|---|
+| First node: a single large, pulsing fight node at bottom centre (~605,512); the run is on floor 0 until it's clicked | Commit | confirmed. Haiku misread it as "where I am standing" |
 | Next reachable node (fight, elite, rest, shop, event, treasure, boss) | Commit | unverified |
 | Scroll the map up and down to see further acts | Inspect | unverified |
 | Legend or hover a node type | Inspect | unverified |

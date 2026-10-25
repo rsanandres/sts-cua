@@ -152,3 +152,9 @@ def test_goal_and_shortcuts_reach_the_model(frame):
     assert req["messages"][0]["content"][1]["text"].startswith("Goal: Start a singleplayer run")
     assert "1 to 9, then 0" in req["system"][0]["text"]
     assert decision.actions == [Key("1")]
+
+
+def test_done_reply_sets_done(frame):
+    response = message([{"type": "text", "text": "DONE: on the Act 1 map."}], stop_reason="end_turn")
+    decision = ClaudeModel(ClaudeConfig(), client=FakeClient(response)).decide(Observation(1, frame, []))
+    assert decision.done and decision.actions == []

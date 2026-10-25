@@ -44,6 +44,7 @@ class Decision:
     # The model's internal reasoning when the provider returns it (Claude returns a summary).
     reasoning: str = ""
     stop_reason: str | None = None
+    done: bool = False  # the model says the goal is reached
     usage: Usage = field(default_factory=Usage)
     # Provider response, kept for the run log.
     raw: dict | None = None
