@@ -49,7 +49,9 @@ Combat:
 - End your turn with e only when no card is selected.
 
 Map:
-- Your position is marked on the map. Paths go upward from it: the next nodes you can choose are the ones connected directly above your marker.
+- At the start of an act (floor 0 in the top bar) you have no position yet. The only node you can choose is the single large node at the bottom centre of the map; it is not you. Click it to start floor 1.
+- After that, your position is marked on the map. Paths go upward from it: the next nodes you can choose are the ones connected directly above your marker.
+- If clicking a node does nothing, you can't reach it yet. Choose a node connected directly above your position, or the bottom node at floor 0.
 - Nodes below your marker are floors you already finished. Hovering one shows a tooltip with that floor's past rewards; that means you are looking at history, not a choice.
 - The floor number in the top bar tells you how far you have climbed.
 

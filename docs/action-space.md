@@ -53,7 +53,7 @@ Act 1 is "Overgrowth". The top bar shows HP, gold, 3 potion slots, floor number,
 
 | Element | Kind | Status |
 |---|---|---|
-| First node: a single large, pulsing fight node at bottom centre (~605,512); the run is on floor 0 until it's clicked | Commit | confirmed. Haiku misread it as "where I am standing" |
+| First node: a single large, pulsing fight node at bottom centre (~605,512); the run is on floor 0 until it's clicked | Commit | confirmed. Haiku misread it as "where I am standing" and clicked unreachable row-2 nodes until the stuck stop (run 20261025T181043Z); the prompt now names it |
 | Next reachable node (fight, elite, rest, shop, event, treasure, boss): directly **above** the player marker; paths go upward | Commit | confirmed (run 20261025T165758Z) |
 | Hover a node below the marker (already visited) | Tooltip with that floor's history, e.g. "Floor 2… Rewards: 17 Gold, Inflame; Skipped: Breakthrough, Anger" | Inspect | confirmed. Haiku clicked a visited node 39 times thinking it was the next choice |
 | Scroll the map up and down to see further acts | Inspect | unverified |
