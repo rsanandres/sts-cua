@@ -1,6 +1,6 @@
 """Per-token prices in USD per million tokens.
 
-Source: https://platform.claude.com/docs/en/about-claude/pricing (checked 2026-10-25).
+Source: https://platform.claude.com/docs/en/about-claude/pricing (checked 2026-10-25; Opus 5.5 added the same day).
 Haiku 5.5 prices are for prompts up to 100,000 tokens, which every step here stays under.
 """
 
@@ -12,6 +12,7 @@ PRICES = {
     # model: (input, output, 5m cache write, cache read)
     "claude-haiku-5-5": (0.10, 0.50, 0.125, 0.01),
     "claude-sonnet-5-5": (2.00, 10.00, 2.50, 0.10),
+    "claude-opus-5-5": (4.00, 20.00, 5.00, 0.20),
 }
 
 
