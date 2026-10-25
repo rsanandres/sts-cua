@@ -158,3 +158,12 @@ def test_done_reply_sets_done(frame):
     response = message([{"type": "text", "text": "DONE: on the Act 1 map."}], stop_reason="end_turn")
     decision = ClaudeModel(ClaudeConfig(), client=FakeClient(response)).decide(Observation(1, frame, []))
     assert decision.done and decision.actions == []
+
+
+def test_history_mentions_unchanged_screen(frame):
+    client = FakeClient(message([tool("wait", {"duration": 1})]))
+    model = ClaudeModel(ClaudeConfig(), client=client)
+    model.decide(Observation(2, frame, [HistoryEntry(1, "", [Click(420, 550)], unchanged=True)]))
+    text = client.requests[0]["messages"][0]["content"][1]["text"]
+    assert "Step 1: click at (420, 550) -> the screen did not change" in text
+    assert "Paths go upward" in client.requests[0]["system"][0]["text"]

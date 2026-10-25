@@ -19,6 +19,8 @@ class HistoryEntry:
     step: int
     thought: str
     actions: list[Action]
+    # Set after the next screenshot: the step's actions left the screen (almost) unchanged.
+    unchanged: bool = False
 
 
 @dataclass

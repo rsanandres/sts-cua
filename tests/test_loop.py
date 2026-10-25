@@ -111,3 +111,35 @@ def test_state_is_logged_not_shown(tmp_path, frame):
         state_fn=lambda: {"state_type": "monster", "floor": 1})
     assert "state" not in seen[0]
     assert read_steps(log)[0]["state"] == {"state_type": "monster", "floor": 1}
+
+
+def test_unchanged_screen_is_flagged_and_stops(tmp_path, frame):
+    seen = []
+
+    class Clicker:
+        name = "clicker"
+
+        def decide(self, obs):
+            seen.append([h.unchanged for h in obs.history])
+            return Decision(thought="", actions=[Click(10, 10)])
+
+    log = RunLog(tmp_path, meta={})
+    summary = run(Clicker(), FakeScreen([frame]), log, LoopConfig(max_steps=20, settle_seconds=0, max_unchanged=3))
+    assert summary["end_reason"] == "stuck"
+    assert seen[1] == [True]  # step 2 already knows step 1 changed nothing
+
+
+def test_changing_screen_is_not_stuck(tmp_path, frame):
+    from PIL import Image
+
+    frames = [Image.new("RGB", (1280, 720), (i * 40 % 255, 0, 0)) for i in range(6)]
+
+    class Clicker:
+        name = "clicker"
+
+        def decide(self, obs):
+            return Decision(thought="", actions=[Click(10, 10)])
+
+    log = RunLog(tmp_path, meta={})
+    summary = run(Clicker(), FakeScreen(frames), log, LoopConfig(max_steps=6, settle_seconds=0, max_unchanged=2))
+    assert summary["end_reason"] == "max_steps"
