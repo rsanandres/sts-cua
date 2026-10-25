@@ -6,4 +6,6 @@ runs/
 game-config-backup/
 *.png
 !docs/**/*.png
+!src/sts_cua/app/static/**/*.png
 target.json
+/memory/

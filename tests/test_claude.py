@@ -167,3 +167,18 @@ def test_history_mentions_unchanged_screen(frame):
     text = client.requests[0]["messages"][0]["content"][1]["text"]
     assert "Step 1: click at (420, 550) -> the screen did not change" in text
     assert "Paths go upward" in client.requests[0]["system"][0]["text"]
+
+
+def test_notes_go_after_the_cache_breakpoint(frame):
+    client = FakeClient(message([tool("wait", {"duration": 1})]))
+    model = ClaudeModel(ClaudeConfig(), client=client)
+    model.decide(Observation(1, frame, []))
+    model.decide(Observation(2, frame, [], notes="Lessons from your earlier runs:\n- Nibbit hits for 12 on turn 1."))
+    plain, with_notes = client.requests
+    # The cached prefix (tools + system) is byte-identical with and without notes.
+    assert with_notes["tools"] == plain["tools"] and with_notes["system"] == plain["system"]
+    assert "Nibbit" not in with_notes["system"][0]["text"]
+    text = with_notes["messages"][0]["content"][1]["text"]
+    assert "Lessons from your earlier runs:\n- Nibbit hits for 12 on turn 1." in text
+    assert text.index("Lessons") < text.index("This is the first step.")
+    assert "Lessons" not in plain["messages"][0]["content"][1]["text"]

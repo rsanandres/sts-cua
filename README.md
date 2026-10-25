@@ -116,13 +116,27 @@ cat target.json
 
 Claude needs `ANTHROPIC_API_KEY` (or an `ant auth login` profile). Each run writes `runs/<timestamp>/` with `meta.json`, `steps.jsonl` (thought, reasoning summary, proposed and executed actions, tokens, cost per step), a screenshot per step, and `summary.json`. A run stops at `--max-steps`, at `--max-cost` USD, after 3 steps in a row with no action, or after 3 errors in a row.
 
+### With the local model
+
+Start vLLM in WSL with the command in [docs/hosting.md](docs/hosting.md#model), then point the harness at it:
+
+```
+.venv/bin/python -m sts_cua --display :99 --model qwen3-vl-8b --max-steps 20
+.venv/bin/python -m sts_cua --display :99 --model qwen3-vl-8b --base-url http://localhost:8000/v1 --served-model my-lora --temperature 0
+```
+
+`--served-model` defaults to `Qwen/Qwen3-VL-8B-Instruct-FP8`, the name `vllm serve` gives it; pass a LoRA adapter's name to run that instead. Set `VLLM_API_KEY` if vLLM runs with `--api-key`. The adapter uses Qwen3-VL's own `computer_use` tool and `<tool_call>` format, with coordinates on a 0-1000 scale converted to screen pixels. Its steps cost $0, and each step's `raw` holds the request (screenshot replaced by a placeholder; it's saved next to the step), the reply text, token usage, per-token logprobs and token IDs, for building SFT and RL data later.
+
 Code map:
 
 - `src/sts_cua/loop.py`: screenshot, decide, act, log.
 - `src/sts_cua/models/base.py`: the `Model.decide(Observation) -> Decision` interface every adapter implements.
+- `src/sts_cua/models/factory.py`: `add_model_args(parser)` and `build_model(args)`, shared by every CLI that picks a model.
 - `src/sts_cua/models/claude.py`: Claude adapter on the `computer_toolset_20260801` tool. Each step is a fresh request (cached system prompt and tools, a text log of recent steps, the current screenshot), so nothing is replayed and cost per step stays flat.
+- `src/sts_cua/models/qwen.py`: Qwen3-VL adapter for vLLM's OpenAI-compatible server, the same fresh request each step.
 - `src/sts_cua/screen.py`: `X11Screen` (mss capture, xdotool input) and `FakeScreen` for tests.
 - `src/sts_cua/runlog.py`, `src/sts_cua/pricing.py`: run logs and per-step cost.
+- `src/sts_cua/memory/`: lessons carried between runs (see "Memory across runs").
 
 ## Run Slay the Spire 2
 
@@ -154,6 +168,59 @@ Copy `STS2_MCP.dll` + `STS2_MCP.json` into `<game>/mods/` and accept the "Load M
 
 The harness only reads `GET /api/v1/singleplayer` (`src/sts_cua/state.py`) and logs a summary per step as ground truth (screen type, floor, HP, energy, hand, enemies and intents). The agent never sees it; it stays pixel-only. Never call the mod's POST endpoints from the harness.
 
+## Play runs back to back
+
+Needs the game on the main menu (`tools/launch_sts2.sh`) and the STS2MCP mod, which the supervisor reads to tell when a run is over.
+
+```
+python -m sts_cua.supervisor --display :99 --model scripted --max-runs 1 --max-steps 5   # dry run, no API calls
+python -m sts_cua.supervisor --display :99 --model claude-haiku-5-5 --thinking off --daily-budget 2.00 --game-build v0.107.1
+python -m sts_cua.supervisor ... --memory memory/notes.jsonl                # learn across runs (see below)
+```
+
+Each game run starts a new singleplayer run from the main menu and plays it to the end. A run stops when the mod shows the game-over screen or a menu after the run started, or at the usual caps (`--max-steps` 3000, `--max-cost` per run, default whatever is left of today's budget, 10 idle steps in a row). Then the supervisor writes `score.json` into the run dir: outcome (won, died, abandoned, unknown), max floor, bosses killed, and a per-combat breakdown. It also appends one line to `runs/ledger.jsonl`. Score is 100 for a win, otherwise floor + 52/3 per boss killed (AgenticSTS's score).
+
+If the game isn't on the main menu with no saved run before a run, a short reset run (meta `kind: "reset"`, no score) asks the model to get it there. The daily budget is the sum of `cost_usd` in `runs/*/summary.json` that ended today in America/Los_Angeles, reset runs and earlier sessions included, plus the `cost_usd` of each `runs/*/memory_reflect.json` by its `time` (the run's summary never includes the reflect call, so nothing is counted twice). The supervisor stops when less than `--reserve` ($0.10) is left, after `--max-runs`, when the mod can't be reached, when the reset fails, or after 3 runs in a row that never got into a run.
+
+With `--memory PATH`, each game run gets a fresh `Retriever` over the store (a new probation seed, recorded in `meta.json["memory"]` as with `python -m sts_cua --memory`), and reset runs get no notes. After each game run the supervisor scores it against the store (`memory_score.json`), then makes one reflect call (Sonnet 5.5, `memory_reflect.json`) unless `--no-reflect` is given. Each game run's cost cap keeps `--reflect-reserve` ($0.05, the expected reflect cost) back, and reflect is skipped when less than that is left today. A failed score or reflect is written to `memory_error.json` in the run dir and the session carries on. Ledger lines carry `memory` (the store path, or null), `notes_added` and `notes_changed` (from the reflect results; null when there was no reflect) and `reflect_cost_usd`.
+
+- `src/sts_cua/supervisor.py`: the session loop and budget accounting.
+- `src/sts_cua/score.py`: outcome, score and per-combat breakdown from a run's logged states (`load_states(run_dir)`), and the stop check (`RunOverDetector`).
+
+## Memory across runs
+
+The agent improves across runs without weight updates: after each run it writes a few short lessons, and later runs see the ones that match the current screen.
+
+```
+python -m sts_cua --model claude-haiku-5-5 --memory memory/notes.jsonl ...   # show matching notes each step
+python -m sts_cua.memory reflect runs/<run>      # score the run, then one Claude call (Sonnet 5.5) edits the store
+python -m sts_cua.memory score runs/<run>        # only update note utilities (reflect already does this)
+python -m sts_cua.memory list | show <id> | retire <id>
+python -m sts_cua.memory reflect runs/<run> --dry-run   # print the request, no API call
+```
+
+- **Store:** `memory/notes.jsonl`, one note per line: kind (ui, enemy, card, event, strategy, pitfall), keys (screen, enemy, card, event, act, character, game_version), text up to 300 characters, status (probation, active, retired), utility stats, source runs. The store is generated on Raph's PC from his runs, so `memory/` is in `.gitignore`.
+- **Retrieval** (`memory/retrieve.py`, plain code, no model call): a note applies when all its keys match what is on screen (screen type, enemy names, card names in hand, event title, act). Keys may only name things visible on screen; the mod's state is used only because it already names them. Active notes are shown best utility first, capped at ~600 tokens, plus an always-on playbook of general strategy notes capped at ~1,500 tokens. Probation notes are shown on a seeded coin flip per floor so whole combats are A/B units; the seed is in `meta.json` and each step logs `notes_shown`.
+- **Delivery:** the notes go into the per-step user message, after the cached tools and system prompt, labelled as lessons from earlier runs.
+- **Reflect** (`memory/reflect.py`): one call with a digest of the run (per-combat HP table, outcome, wasted or erroring steps, the agent's thoughts at key moments, the notes it was shown with their stats). It returns delta operations only: ADD (at most 3, deduped against notes with the same keys), UPDATE, DOWNVOTE, RETIRE. Cost goes to `memory_reflect.json` in the run directory.
+- **Validation gate** (`memory/score.py`): per note, loss when shown vs hidden (HP lost per combat as a share of max HP for enemy, card and strategy notes; share of wasted steps per screen visit for ui, pitfall and event notes). Utility = hidden minus shown, with a simple Welch interval. Probation becomes active when the lower bound is above 0 after 5 shown and 3 hidden units; any note is retired when the upper bound is below 0. Results go to `memory_score.json`. Fights come from `sts_cua.score.combats`, and reset runs (meta `kind: "reset"`) are neither scored nor reflected on. With `--memory`, the supervisor scores and reflects on every game run itself.
+
+## Control app
+
+One page to run everything from the PC or the phone: start and stop the stack and the local model, start and stop supervisor sessions, watch the live run and screen, read results, spend and logs, and retire notes or reflect on a run.
+
+```
+.venv/bin/python -m sts_cua.app          # http://127.0.0.1:8765, prints the token on first start
+```
+
+On Windows, `tools/windows/sts-cua-app.cmd` starts the server in WSL if it isn't answering and opens it in an Edge app window; [tools/windows/README.md](tools/windows/README.md) covers phone access through `tailscale serve`. The API is [docs/app-api.md](docs/app-api.md).
+
+- Stdlib only (`ThreadingHTTPServer`), bound to 127.0.0.1. Every `/api/` call except `/api/health` needs the token in `~/.sts-cua/app-token` (mode 600), as a Bearer header or the HttpOnly, SameSite=Strict cookie that `/login?token=...` sets. No localhost exemption, since `tailscale serve` traffic also arrives from localhost. POSTs must be JSON.
+- Fixed actions only: argv lists built from validated fields (model allowlist, clamped numbers, names matching `^[\w.-]+$`, paths kept inside `runs/`), never a command string from a request.
+- Children it starts (supervisor, vLLM, `stack_up.sh`, reflect) get pid files in `~/.sts-cua/run/`, so a restarted app still knows them, and log to `~/.sts-cua/logs/`. Processes started elsewhere are found with pgrep.
+- `tools/stack_down.sh` stops agent runs with a pattern that leaves `python -m sts_cua.app` running.
+- `src/sts_cua/app/`: `server.py` (HTTP, auth, static page), `routes.py` (endpoints), `procs.py` (processes), `files.py` (tailing logs, run dirs), `static/` (the page).
+
 ## Status
 
-Harness runs Spire 2 end to end on Raph's PC. Haiku 5.5 won the first fight of Act 1 (14 steps, $0.0056, run 20261025T164617Z). Next: the supervisor for back-to-back full runs.
+Harness runs Spire 2 end to end on Raph's PC. Haiku 5.5 won the first fight of Act 1 (14 steps, $0.0056, run 20261025T164617Z). The supervisor for back-to-back full runs (`python -m sts_cua.supervisor`) is written and tested on fakes only; it has not run against the game yet.

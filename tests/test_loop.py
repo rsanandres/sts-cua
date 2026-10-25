@@ -143,3 +143,64 @@ def test_changing_screen_is_not_stuck(tmp_path, frame):
     log = RunLog(tmp_path, meta={})
     summary = run(Clicker(), FakeScreen(frames), log, LoopConfig(max_steps=6, settle_seconds=0, max_unchanged=2))
     assert summary["end_reason"] == "max_steps"
+
+
+def test_stop_fn_ends_the_loop_after_logging(tmp_path, frame):
+    states = iter([{"floor": 1}, {"floor": 2}, {"state_type": "game_over"}, {"floor": 9}])
+    seen = []
+
+    def stop_fn(state):
+        seen.append(state)
+        return "run_over:died" if state.get("state_type") == "game_over" else None
+
+    model = ScriptedModel([[Click(1, 1)]] * 10)
+    screen = FakeScreen([frame])
+    log = RunLog(tmp_path, meta={})
+    summary = run(model, screen, log, LoopConfig(max_steps=10, settle_seconds=0),
+                  state_fn=lambda: next(states), stop_fn=stop_fn)
+    assert summary["end_reason"] == "run_over:died" and summary["steps"] == 3
+    assert len(screen.performed) == 2  # the model isn't asked on the stopping step
+    steps = read_steps(log)
+    assert steps[-1]["state"] == {"state_type": "game_over"} and "thought" not in steps[-1]
+    assert len(seen) == 3
+
+
+def test_notes_reach_model_and_are_logged(tmp_path, frame):
+    seen, states = [], iter([{"state_type": "map"}, {"state_type": "monster"}])
+
+    class Reader:
+        name = "reader"
+
+        def decide(self, obs):
+            seen.append(obs.notes)
+            return Decision(thought="", actions=[Click(0, 0)])
+
+    def notes_fn(state):
+        return ("- on the map, click a node", ["n0001"]) if state["state_type"] == "map" else ("", [])
+
+    log = RunLog(tmp_path, meta={})
+    run(Reader(), FakeScreen([frame]), log, LoopConfig(max_steps=2, settle_seconds=0),
+        state_fn=lambda: next(states), notes_fn=notes_fn)
+    assert seen == ["- on the map, click a node", ""]
+    assert [s["notes_shown"] for s in read_steps(log)] == [["n0001"], []]
+
+    log = RunLog(tmp_path, meta={})
+    run(Reader(), FakeScreen([frame]), log, LoopConfig(max_steps=1, settle_seconds=0))
+    assert "notes_shown" not in read_steps(log)[0] and seen[-1] == ""
+
+
+def test_interrupt_still_writes_summary(tmp_path, frame):
+    import json
+
+    import pytest
+
+    class Interrupted:
+        name = "interrupted"
+
+        def decide(self, obs):
+            raise KeyboardInterrupt
+
+    log = RunLog(tmp_path, meta={})
+    with pytest.raises(KeyboardInterrupt):
+        run(Interrupted(), FakeScreen([frame]), log, LoopConfig(max_steps=5, settle_seconds=0))
+    assert json.loads((log.dir / "summary.json").read_text())["end_reason"] == "interrupted"

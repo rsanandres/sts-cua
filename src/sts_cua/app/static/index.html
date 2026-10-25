@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>sts-cua control</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <span id="conn" class="dot" title="Server connection"></span>
+    <strong>sts-cua</strong>
+    <span id="busy-badge" class="badge warn" hidden></span>
+  </div>
+  <nav class="tabs" aria-label="Screens">
+    <a href="#control" data-tab="control">Control</a>
+    <a href="#run" data-tab="run">Run</a>
+    <a href="#results" data-tab="results">Results</a>
+    <a href="#memory" data-tab="memory">Memory</a>
+  </nav>
+  <button type="button" id="logs-open" class="ghost">Logs</button>
+</header>
+
+<div id="auth" class="auth" hidden>
+  <h2>Not signed in</h2>
+  <p>Open the login link with your token: <code id="auth-url"></code></p>
+  <p class="muted">The Windows launcher opens it for you. On the phone, open it once and the cookie keeps you signed in.
+    The token is in <code>~/.sts-cua/app-token</code> inside WSL.</p>
+</div>
+
+<main id="main">
+  <!-- Control -->
+  <section id="tab-control" class="tab" hidden>
+    <div class="grid two">
+      <div class="card">
+        <h2>Processes</h2>
+        <ul id="procs" class="procs"></ul>
+        <p id="mod-line" class="mod-line muted">Mod: ...</p>
+      </div>
+      <div class="card">
+        <h2>Resources</h2>
+        <div id="gpu-bar" class="meter"></div>
+        <div id="ram-bar" class="meter"></div>
+        <div id="ctl-budget" class="meter"></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Stack</h2>
+      <p id="busy-line" class="muted">Idle.</p>
+      <div class="buttons">
+        <button type="button" id="stack-up" class="primary">Stack up</button>
+        <button type="button" id="stack-down">Stack down</button>
+      </div>
+      <div class="buttons">
+        <label class="inline">Model
+          <select id="vllm-model">
+            <option value="qwen3-vl-8b">qwen3-vl-8b</option>
+          </select>
+        </label>
+        <button type="button" id="vllm-start">Start vLLM</button>
+        <button type="button" id="vllm-stop">Stop vLLM</button>
+      </div>
+    </div>
+    <div class="card danger-zone">
+      <h2>Shut down WSL</h2>
+      <p class="muted">Stops everything in WSL (runs, vLLM, the game, Steam and this app) and frees the GPU memory and RAM for gaming on Windows.</p>
+      <button type="button" id="wsl-shutdown" class="danger">Shut down WSL</button>
+    </div>
+  </section>
+
+  <!-- Run -->
+  <section id="tab-run" class="tab" hidden>
+    <div class="grid run-grid">
+      <form id="run-form" class="card" autocomplete="off">
+        <h2>Start a run</h2>
+        <label>Model
+          <select id="run-model">
+            <option value="claude-haiku-5-5">claude-haiku-5-5</option>
+            <option value="claude-sonnet-5-5">claude-sonnet-5-5</option>
+            <option value="qwen3-vl-8b">qwen3-vl-8b (local vLLM)</option>
+            <option value="scripted">scripted</option>
+          </select>
+        </label>
+        <div class="row">
+          <label>Thinking
+            <select id="run-thinking">
+              <option value="off">off</option>
+              <option value="on">on</option>
+            </select>
+          </label>
+          <label>Effort
+            <select id="run-effort">
+              <option value="low">low</option>
+              <option value="medium" selected>medium</option>
+              <option value="high">high</option>
+            </select>
+          </label>
+        </div>
+        <div class="row">
+          <label>Budget per day ($)
+            <input id="run-budget" type="number" min="0" max="5" step="0.05" value="2.00" inputmode="decimal">
+          </label>
+          <label>Max runs
+            <input id="run-maxruns" type="number" min="1" step="1" placeholder="no limit" inputmode="numeric">
+          </label>
+        </div>
+        <label>Game build (optional)
+          <input id="run-build" type="text" placeholder="e.g. v0.107.1">
+        </label>
+        <label class="check"><input id="run-memory" type="checkbox" checked> Use memory notes</label>
+        <p id="run-hint" class="muted small"></p>
+        <div class="buttons">
+          <button type="submit" id="run-start" class="primary">Start</button>
+          <button type="button" id="run-stop">Stop</button>
+        </div>
+      </form>
+
+      <div class="card live">
+        <div class="live-head">
+          <h2>Live</h2>
+          <span id="live-status" class="badge"></span>
+        </div>
+        <p id="live-meta" class="muted small"></p>
+        <div class="stats">
+          <div><span class="label">Step</span><span id="live-step" class="num">-</span></div>
+          <div><span class="label">Cost</span><span id="live-cost" class="num">-</span></div>
+          <div><span class="label">Updated</span><span id="live-time" class="num">-</span></div>
+        </div>
+        <label class="check small"><input id="live-fresh" type="checkbox"> Show a fresh capture of the screen instead of the last step's screenshot</label>
+        <div class="shot-wrap">
+          <img id="live-shot" class="shot" alt="Latest screenshot" hidden>
+          <p id="live-noshot" class="muted">No screenshot yet.</p>
+        </div>
+        <div id="live-error" class="error" hidden></div>
+        <h3>Thought</h3>
+        <p id="live-thought" class="thought"></p>
+        <h3>Actions</h3>
+        <ul id="live-actions" class="actions"></ul>
+        <h3>State</h3>
+        <div id="live-state" class="state"></div>
+        <h3>Notes shown</h3>
+        <ul id="live-notes" class="notes"></ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Results -->
+  <section id="tab-results" class="tab" hidden>
+    <div id="results-list">
+      <div class="card">
+        <h2>Today's spend</h2>
+        <div id="res-budget" class="meter"></div>
+      </div>
+      <div class="card">
+        <div class="table-head">
+          <h2>Runs</h2>
+          <label class="check small"><input id="show-reset" type="checkbox"> Show reset runs</label>
+          <button type="button" id="runs-refresh" class="ghost small">Refresh</button>
+        </div>
+        <table id="runs-table" class="cards">
+          <thead><tr>
+            <th>Time</th><th>Kind</th><th>Model</th><th>Outcome</th><th class="n">Floor</th>
+            <th class="n">Score</th><th class="n">Cost</th><th class="n">Steps</th><th>End reason</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+        <p id="runs-empty" class="muted" hidden>No runs yet.</p>
+        <button type="button" id="runs-more" class="ghost" hidden>Show more</button>
+      </div>
+    </div>
+
+    <div id="replay" hidden>
+      <div class="card">
+        <div class="table-head">
+          <a href="#results" class="button ghost small" id="replay-back">&larr; Runs</a>
+          <h2 id="replay-title">Run</h2>
+        </div>
+        <div class="grid three" id="replay-info"></div>
+        <div id="replay-combats"></div>
+      </div>
+      <div class="card">
+        <div class="stepnav">
+          <button type="button" id="step-prev" aria-label="Previous step">&larr; Prev</button>
+          <span id="step-label" class="num">-</span>
+          <button type="button" id="step-next" aria-label="Next step">Next &rarr;</button>
+        </div>
+        <input id="step-range" type="range" min="0" max="0" value="0" aria-label="Step">
+        <p class="muted small center">Arrow keys move between steps.</p>
+        <div class="grid replay-grid">
+          <div class="shot-wrap">
+            <a id="step-shot-link" target="_blank" rel="noopener"><img id="step-shot" class="shot" alt="Step screenshot"></a>
+          </div>
+          <div>
+            <p id="step-meta" class="muted small"></p>
+            <div id="step-error" class="error" hidden></div>
+            <h3>Thought</h3>
+            <p id="step-thought" class="thought"></p>
+            <details id="step-reasoning-box" hidden><summary>Reasoning</summary><p id="step-reasoning" class="thought"></p></details>
+            <h3>Actions</h3>
+            <ul id="step-actions" class="actions"></ul>
+            <div id="step-proposed-box" hidden>
+              <h3>Proposed</h3>
+              <ul id="step-proposed" class="actions"></ul>
+            </div>
+            <h3>State</h3>
+            <div id="step-state" class="state"></div>
+            <h3>Notes shown</h3>
+            <ul id="step-notes" class="notes"></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Memory -->
+  <section id="tab-memory" class="tab" hidden>
+    <div class="card">
+      <h2>Reflect on a run</h2>
+      <p class="muted small">Runs the post-run editor on a finished run in the background. New or changed notes show up here when it finishes.</p>
+      <div class="buttons">
+        <select id="reflect-run" aria-label="Run to reflect on"></select>
+        <button type="button" id="reflect-go">Reflect on run</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="table-head">
+        <h2>Notes</h2>
+        <label class="inline small">Status
+          <select id="notes-status">
+            <option value="all">all</option>
+            <option value="probation">probation</option>
+            <option value="active">active</option>
+            <option value="retired">retired</option>
+          </select>
+        </label>
+        <button type="button" id="notes-refresh" class="ghost small">Refresh</button>
+      </div>
+      <p id="notes-path" class="muted small"></p>
+      <table id="notes-table" class="cards">
+        <thead><tr>
+          <th>ID</th><th>Status</th><th>Kind</th><th>Keys</th><th>Text</th><th class="n">Shown</th><th>Utility</th><th></th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+      <p id="notes-empty" class="muted" hidden>No notes.</p>
+    </div>
+  </section>
+</main>
+
+<aside id="logs" class="drawer" hidden aria-label="Logs">
+  <div class="drawer-head">
+    <h2>Logs</h2>
+    <select id="log-name" aria-label="Log">
+      <option value="supervisor">supervisor</option>
+      <option value="vllm">vllm</option>
+      <option value="game">game</option>
+      <option value="steam">steam</option>
+      <option value="app">app</option>
+    </select>
+    <select id="log-lines" aria-label="Lines">
+      <option value="100">100 lines</option>
+      <option value="200" selected>200 lines</option>
+      <option value="500">500 lines</option>
+      <option value="1000">1000 lines</option>
+    </select>
+    <label class="check small"><input id="log-follow" type="checkbox" checked> Follow</label>
+    <button type="button" id="log-refresh" class="ghost small">Refresh</button>
+    <button type="button" id="logs-close" class="ghost small" aria-label="Close logs">Close</button>
+  </div>
+  <pre id="log-text" class="log"></pre>
+</aside>
+
+<dialog id="confirm">
+  <form method="dialog">
+    <h2 id="confirm-title"></h2>
+    <p id="confirm-body"></p>
+    <div class="buttons end">
+      <button value="cancel" id="confirm-cancel">Cancel</button>
+      <button value="ok" id="confirm-ok" class="danger">OK</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>

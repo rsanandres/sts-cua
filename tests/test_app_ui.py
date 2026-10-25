@@ -1,0 +1,173 @@
+"""Browser test of the control app's page against the stub server (tests/app_ui_stub.py).
+
+Uses the pre-installed Playwright Chromium; skipped if Playwright isn't importable or no
+browser is installed. Set STS_UI_SHOTS=<dir> to keep screenshots of each screen.
+"""
+
+import os
+from pathlib import Path
+
+import pytest
+
+sync_api = pytest.importorskip("playwright.sync_api")
+
+from app_ui_stub import TOKEN, serve  # noqa: E402
+
+VIEWPORTS = {"phone": (390, 844), "desktop": (1280, 800)}
+
+
+@pytest.fixture(scope="module")
+def stub():
+    server, state = serve()
+    yield f"http://127.0.0.1:{server.server_port}", state
+    server.shutdown()
+
+
+@pytest.fixture(scope="module")
+def browser():
+    with sync_api.sync_playwright() as p:
+        try:
+            b = p.chromium.launch()
+        except Exception as exc:  # no browser installed
+            pytest.skip(f"Chromium not available: {exc}")
+        yield b
+        b.close()
+
+
+def shots_dir(tmp_path) -> Path:
+    path = Path(os.environ.get("STS_UI_SHOTS") or tmp_path)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def open_page(browser, base, size, login=True):
+    context = browser.new_context(viewport={"width": size[0], "height": size[1]})
+    page = context.new_page()
+    errors = []
+    page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(f"{base}/login?token={TOKEN}" if login else f"{base}/")
+    return context, page, errors
+
+
+def no_horizontal_scroll(page):
+    assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1")
+
+
+def test_login_message_without_cookie(stub, browser):
+    base, _ = stub
+    context, page, _ = open_page(browser, base, VIEWPORTS["phone"], login=False)
+    auth = page.locator("#auth")
+    auth.wait_for(state="visible")
+    assert "login" in auth.inner_text().lower()
+    assert page.locator("#main").is_hidden()
+    context.close()
+
+
+@pytest.mark.parametrize("name", list(VIEWPORTS))
+def test_screens(stub, browser, tmp_path, name):
+    base, state = stub
+    size = VIEWPORTS[name]
+    out = shots_dir(tmp_path)
+    context, page, errors = open_page(browser, base, size)
+
+    # Control
+    page.locator("#procs .proc").nth(4).wait_for()
+    assert page.locator("#procs .proc").count() == 5
+    assert "vllm" in page.locator("#procs").inner_text()
+    assert "GiB" in page.locator("#gpu-bar").inner_text()
+    assert "Floor 3" in page.locator("#mod-line").inner_text()
+    no_horizontal_scroll(page)
+    page.screenshot(path=str(out / f"ui-control-{name}.png"), full_page=True)
+
+    # WSL shutdown sits behind a confirm; cancelling sends nothing.
+    page.click("#wsl-shutdown")
+    page.locator("#confirm").wait_for(state="visible")
+    assert "frees" in page.locator("#confirm-body").inner_text()
+    page.click("#confirm-cancel")
+    assert not any(path == "/api/wsl/shutdown" for path, _ in state.calls)
+
+    # Run: live panel, model output rendered as text
+    page.click("a[data-tab=run]")
+    page.wait_for_function("document.getElementById('live-thought').textContent.includes('<script>')")
+    assert page.evaluate("window.__xss") is None
+    actions = page.locator("#live-actions").inner_text()
+    assert "right double click at (640, 600) with shift" in actions
+    assert 'type "<b>hi</b>"' in actions
+    assert "<i>x</i>" in page.locator("#live-error").inner_text()
+    page.locator("#live-notes li .nid").first.wait_for()
+    assert "Nibbits hit hard" in page.locator("#live-notes").inner_text()
+    assert page.locator("#live-notes b").count() == 0
+    page.wait_for_function("document.getElementById('live-shot').naturalWidth > 0")
+    assert page.locator("#run-budget").input_value() == "2.00"
+    assert "HP 61/80" in page.locator("#live-state").inner_text()
+    no_horizontal_scroll(page)
+    page.screenshot(path=str(out / f"ui-run-{name}.png"), full_page=True)
+
+    # Results: reset runs hidden by default
+    page.click("a[data-tab=results]")
+    rows = page.locator("#runs-table tbody tr")
+    rows.first.wait_for()
+    assert rows.count() == 4
+    assert page.locator("#runs-table tbody tr[data-kind=reset]").count() == 0
+    page.check("#show-reset")
+    assert rows.count() == 5
+    page.uncheck("#show-reset")
+    assert "$0.42" in page.locator("#res-budget").inner_text()
+    no_horizontal_scroll(page)
+    page.screenshot(path=str(out / f"ui-results-{name}.png"), full_page=True)
+
+    # Replay: first run, step through with buttons and arrow keys
+    rows.first.click()
+    page.wait_for_function("document.getElementById('step-label').textContent.includes('1 of 12')")
+    assert "died" in page.locator("#replay-info").inner_text()
+    assert "Nibbit" in page.locator("#replay-combats").inner_text()
+    page.click("#step-next")
+    page.wait_for_function("document.getElementById('step-label').textContent.includes('2 of 12')")
+    page.keyboard.press("ArrowRight")
+    page.wait_for_function("document.getElementById('step-label').textContent.includes('3 of 12')")
+    assert "<script>" in page.locator("#step-thought").inner_text()
+    assert page.evaluate("window.__xss") is None
+    page.keyboard.press("ArrowRight")
+    page.wait_for_function("document.getElementById('step-label').textContent.includes('4 of 12')")
+    assert "outside the window" in page.locator("#step-error").inner_text()
+    page.keyboard.press("ArrowLeft")
+    page.wait_for_function("document.getElementById('step-label').textContent.includes('3 of 12')")
+    page.wait_for_function("document.getElementById('step-shot').naturalWidth > 0")
+    assert "Nibbit" in page.locator("#step-state").inner_text()
+    no_horizontal_scroll(page)
+    page.screenshot(path=str(out / f"ui-replay-{name}.png"), full_page=True)
+
+    # Memory: filter, retire behind a confirm, reflect
+    page.click("a[data-tab=memory]")
+    notes = page.locator("#notes-table tbody tr")
+    page.wait_for_function("document.querySelectorAll('#notes-table tbody tr').length >= 3")
+    assert "<b>Not</b>" in page.locator("#notes-table").inner_text()
+    page.select_option("#notes-status", "probation")
+    page.wait_for_function("[...document.querySelectorAll('#notes-table tbody tr')].every(r => r.innerText.includes('probation'))")
+    target = notes.first.get_attribute("data-note")
+    page.locator(f"#notes-table tr[data-note={target}] button").click()
+    page.locator("#confirm").wait_for(state="visible")
+    page.click("#confirm-ok")
+    page.wait_for_function(f"!document.querySelector('#notes-table tr[data-note={target}]')")
+    assert (f"/api/memory/notes/{target}/retire", {}) in state.calls
+    page.select_option("#notes-status", "all")
+    page.wait_for_function("document.querySelectorAll('#notes-table tbody tr').length === 4")
+    page.locator("#reflect-run option").first.wait_for(state="attached")
+    page.click("#reflect-go")
+    page.wait_for_function("document.getElementById('toast').textContent.includes('Reflecting')")
+    assert any(path == "/api/memory/reflect" and body.get("run_id") for path, body in state.calls)
+    no_horizontal_scroll(page)
+    page.screenshot(path=str(out / f"ui-memory-{name}.png"), full_page=True)
+
+    # Logs drawer
+    page.click("#logs-open")
+    page.wait_for_function("document.getElementById('log-text').textContent.includes('supervisor line 199 <tag>')")
+    page.select_option("#log-name", "vllm")
+    page.wait_for_function("document.getElementById('log-text').textContent.includes('vllm line 0')")
+    page.screenshot(path=str(out / f"ui-logs-{name}.png"))
+    page.keyboard.press("Escape")
+    assert page.locator("#logs").is_hidden()
+
+    assert errors == []
+    context.close()
