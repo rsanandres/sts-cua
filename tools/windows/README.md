@@ -22,8 +22,9 @@ The server only listens on localhost. The phone reaches it through Tailscale, ta
 
 The server must be running (start it with `sts-cua-app.cmd`). Anyone with the token can control the stack; to revoke it, delete `~/.sts-cua/app-token` in WSL and restart the server, which makes a new one.
 
-From Tailscale's [serve docs](https://tailscale.com/kb/1242/tailscale-serve) (read 2026-10-25): a target can be a bare port number, HTTPS is the default with an automatically provisioned certificate, serve shares within the tailnet only (Funnel is the public variant), and `tailscale serve reset` clears the config. Unverified:
+From Tailscale's [serve docs](https://tailscale.com/kb/1242/tailscale-serve) (read 2026-10-25): a target can be a bare port number, HTTPS is the default with an automatically provisioned certificate, serve shares within the tailnet only (Funnel is the public variant), and `tailscale serve reset` clears the config. Windows `localhost:8765` reaches the server inside WSL: `.wslconfig`'s `localhostForwarding` (default `true`) makes "ports bound to wildcard or localhost in the WSL 2 VM" connectable from Windows via `localhost:port` ([wsl-config](https://learn.microsoft.com/en-us/windows/wsl/wsl-config), read 2026-10-25). In mirrored networking mode the setting is ignored and localhost is shared outright.
+
+Unverified:
 - That a bare port proxies to `127.0.0.1:<port>` (the docs only say "only `http://127.0.0.1` is supported for proxies"). If not, use `tailscale serve --bg http://127.0.0.1:8765`.
 - Whether HTTPS certificates and MagicDNS must be turned on in the tailnet's admin console first; the CLI says so if they are needed.
-- That Windows `localhost:8765` reaches the server inside WSL. Microsoft's [WSL networking docs](https://learn.microsoft.com/en-us/windows/wsl/networking) say Windows apps reach WSL servers via `localhost` in the default NAT mode, without saying whether that covers a server bound to `127.0.0.1` (this one is). Mirrored networking mode shares localhost outright.
 - Edge's `--app=` window mode is a Chromium switch, not documented by Microsoft; if it misbehaves, the launcher's default-browser fallback is the same URL.
