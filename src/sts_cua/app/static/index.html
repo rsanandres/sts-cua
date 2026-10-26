@@ -20,6 +20,7 @@
     <a href="#run" data-tab="run">Run</a>
     <a href="#results" data-tab="results">Results</a>
     <a href="#memory" data-tab="memory">Memory</a>
+    <a href="#bench" data-tab="bench">Bake-off</a>
   </nav>
   <button type="button" id="logs-open" class="ghost">Logs</button>
 </header>
@@ -79,6 +80,16 @@
         <button type="button" id="model-stop">Stop</button>
         <button type="button" id="model-download">Download</button>
       </div>
+      <div class="subsection" id="llama-box">
+        <h3>llama.cpp</h3>
+        <p id="llama-line" class="muted small">Looking for llama-server...</p>
+        <div class="buttons">
+          <button type="button" id="llama-install">Install llama.cpp</button>
+          <label class="check small"><input id="llama-prebuilt" type="checkbox"> Prebuilt release (no CUDA toolkit needed)</label>
+        </div>
+        <p id="llama-hint" class="muted small" hidden></p>
+        <pre id="llama-tail" class="log-tail" hidden></pre>
+      </div>
     </div>
     <div class="card danger-zone">
       <h2>Shut down WSL</h2>
@@ -94,13 +105,34 @@
         <h2>Start a run</h2>
         <label>Model
           <select id="run-model">
-            <option value="claude-haiku-5-5">claude-haiku-5-5</option>
-            <option value="claude-sonnet-5-5">claude-sonnet-5-5</option>
-            <option value="qwen3-vl-8b">qwen3-vl-8b (local vLLM)</option>
+            <optgroup label="Claude">
+              <option value="claude-haiku-5-5">claude-haiku-5-5</option>
+              <option value="claude-sonnet-5-5">claude-sonnet-5-5</option>
+            </optgroup>
+            <optgroup label="Local (model server)" class="local-models">
+              <option value="qwen3-vl-8b">qwen3-vl-8b</option>
+            </optgroup>
             <option value="scripted">scripted</option>
           </select>
         </label>
-        <div class="row">
+        <div class="row" id="run-local" hidden>
+          <label>Thinking (local)
+            <select id="run-local-thinking">
+              <option value="">default</option>
+              <option value="on">on</option>
+              <option value="off">off</option>
+            </select>
+          </label>
+          <label>Reasoning effort
+            <select id="run-local-effort">
+              <option value="">model default</option>
+              <option value="low">low</option>
+              <option value="medium">medium</option>
+              <option value="xhigh">xhigh</option>
+            </select>
+          </label>
+        </div>
+        <div class="row" id="run-claude">
           <label>Thinking
             <select id="run-thinking">
               <option value="off">off</option>
@@ -170,13 +202,17 @@
       <div class="row">
         <label>Model
           <select id="coop-model">
-            <option value="claude-haiku-5-5" selected>claude-haiku-5-5 (fastest)</option>
-            <option value="claude-sonnet-5-5">claude-sonnet-5-5</option>
-            <option value="qwen3-vl-8b">qwen3-vl-8b (local vLLM)</option>
+            <optgroup label="Claude">
+              <option value="claude-haiku-5-5" selected>claude-haiku-5-5 (fastest)</option>
+              <option value="claude-sonnet-5-5">claude-sonnet-5-5</option>
+            </optgroup>
+            <optgroup label="Local (model server)" class="local-models">
+              <option value="qwen3-vl-8b">qwen3-vl-8b</option>
+            </optgroup>
             <option value="scripted">scripted</option>
           </select>
         </label>
-        <label>Thinking
+        <label class="claude-only">Thinking
           <select id="coop-thinking">
             <option value="off" selected>off (fastest)</option>
             <option value="on">on</option>
@@ -184,11 +220,26 @@
         </label>
       </div>
       <div class="row">
-        <label>Effort
+        <label class="claude-only">Effort
           <select id="coop-effort">
             <option value="low" selected>low</option>
             <option value="medium">medium</option>
             <option value="high">high</option>
+          </select>
+        </label>
+        <label class="local-only" hidden>Thinking (local)
+          <select id="coop-local-thinking">
+            <option value="">default (off in co-op)</option>
+            <option value="on">on</option>
+            <option value="off">off</option>
+          </select>
+        </label>
+        <label class="local-only" hidden>Reasoning effort
+          <select id="coop-local-effort">
+            <option value="">model default</option>
+            <option value="low">low</option>
+            <option value="medium">medium</option>
+            <option value="xhigh">xhigh</option>
           </select>
         </label>
         <label>Max cost ($)
@@ -204,6 +255,7 @@
         </label>
       </div>
       <label class="check"><input id="coop-rules" type="checkbox" checked> General rules first (wait, vote last, end turn without a model call)</label>
+      <p id="coop-hint" class="muted small"></p>
       <p id="coop-status" class="muted small"></p>
       <div class="buttons">
         <button type="submit" id="coop-start" class="primary">Start co-op</button>
@@ -328,6 +380,156 @@
       <p id="notes-empty" class="muted" hidden>No notes.</p>
     </div>
   </section>
+
+  <!-- Bake-off -->
+  <section id="tab-bench" class="tab" hidden>
+    <div class="card" id="bench-job">
+      <div class="table-head">
+        <h2>Bench job</h2>
+        <span id="bench-job-badge" class="badge">idle</span>
+        <button type="button" id="bench-stop" class="small">Stop</button>
+      </div>
+      <p id="bench-job-line" class="muted small">No bench job has run yet. Each button below runs one <code>python -m sts_cua.bench</code> job; one at a time.</p>
+      <pre id="bench-output" class="log-tail tall" hidden></pre>
+      <div id="bench-changed" class="changed" hidden></div>
+    </div>
+
+    <div class="card" id="bench-targets">
+      <div class="table-head">
+        <h2>Targets</h2>
+        <span id="bench-target-count" class="badge">-</span>
+      </div>
+      <p class="muted small">Clicks Claude made in its runs that changed the screen, with an instruction from its thought. Check the contact sheets and delete bad ones.</p>
+      <p id="bench-target-hint" class="small" hidden></p>
+      <div class="buttons">
+        <button type="button" id="bench-extract" class="primary">Extract targets</button>
+        <button type="button" id="bench-review">Make contact sheets</button>
+      </div>
+      <div id="bench-sheets" class="sheets"></div>
+      <details id="bench-delete-box">
+        <summary>Delete targets</summary>
+        <div class="row">
+          <label>Filter by id or instruction
+            <input id="bench-filter" type="search" placeholder="e.g. 20261025T181542Z-0042">
+          </label>
+          <div class="buttons">
+            <button type="button" id="bench-delete" class="danger" disabled>Delete selected</button>
+          </div>
+        </div>
+        <ul id="bench-target-list" class="target-list"></ul>
+      </details>
+    </div>
+
+    <div class="grid two">
+      <form id="bench-grounding" class="card" autocomplete="off">
+        <h2>Grounding</h2>
+        <p class="muted small">Every target sent to each model: the click it returns is a hit within 40 px of Claude's.</p>
+        <fieldset class="models">
+          <legend>Models</legend>
+          <div id="bench-models" class="model-checks"></div>
+        </fieldset>
+        <div class="row">
+          <label>Mode (VRAM budget)
+            <select id="bench-mode">
+              <option value="coop">co-op (13 GiB)</option>
+              <option value="solo" selected>solo (20 GiB)</option>
+              <option value="max">max (all free VRAM)</option>
+            </select>
+          </label>
+          <label>Limit (first N targets)
+            <input id="bench-limit" type="number" min="1" step="1" placeholder="all" inputmode="numeric">
+          </label>
+        </div>
+        <label class="check"><input id="bench-serve" type="checkbox" checked> Start each model for me (stops the model server between models)</label>
+        <p id="bench-grounding-hint" class="muted small"></p>
+        <div class="buttons">
+          <button type="submit" id="bench-grounding-run" class="primary">Run grounding</button>
+        </div>
+      </form>
+
+      <div class="stack">
+      <div class="card" id="bench-resources">
+        <h2>Resources</h2>
+        <p class="muted small">Baselines first: desktop before any game, pre-server with the games up and no model server.</p>
+        <ul id="bench-baselines" class="baselines"></ul>
+        <div class="buttons">
+          <button type="button" id="bench-baseline-desktop">Desktop baseline</button>
+          <button type="button" id="bench-baseline-pre">Pre-server baseline</button>
+        </div>
+        <h3>Measure a model</h3>
+        <div class="row">
+          <label>Model
+            <select id="bench-res-model"></select>
+          </label>
+          <label>Mode
+            <select id="bench-res-mode">
+              <option value="coop">co-op</option>
+              <option value="solo" selected>solo</option>
+              <option value="max">max</option>
+            </select>
+          </label>
+        </div>
+        <label class="check"><input id="bench-res-game" type="checkbox" checked> With the game (also its, Steam's and Xvfb's RAM)</label>
+        <label class="check"><input id="bench-res-serve" type="checkbox"> Start it for me (no model server may be running)</label>
+        <p id="bench-res-hint" class="muted small"></p>
+        <div class="buttons">
+          <button type="button" id="bench-res-run" class="primary">Measure</button>
+        </div>
+      </div>
+
+      <div class="card" id="bench-clicks">
+        <h2>Clicks</h2>
+        <p class="muted small">Live clicks on the click-target page, on its own display <code id="bench-clicks-display">:98</code> (no game needed). A local model needs its server running.</p>
+        <div class="row">
+          <label>Model
+            <select id="bench-clicks-model"></select>
+          </label>
+          <label>Clicks
+            <input id="bench-clicks-n" type="number" min="1" max="100" step="1" value="20" inputmode="numeric">
+          </label>
+        </div>
+        <p id="bench-clicks-hint" class="muted small"></p>
+        <div class="buttons">
+          <button type="button" id="bench-clicks-run" class="primary">Run clicks</button>
+        </div>
+      </div>
+      </div>
+    </div>
+
+    <div class="card" id="bench-results">
+      <div class="table-head">
+        <h2>Results</h2>
+        <button type="button" id="bench-write-docs">Write to docs</button>
+        <button type="button" id="bench-results-refresh" class="ghost small">Refresh</button>
+      </div>
+      <p class="muted small">The newest result per model from <code>runs/bench/</code>. Write to docs updates the bench block and the measured rows in <code>docs/hosting.md</code>.</p>
+      <p id="bench-recommended" class="recommended"></p>
+      <ol id="bench-ranking" class="ranking"></ol>
+      <h3>Grounding</h3>
+      <table id="bench-grounding-table" class="cards">
+        <thead><tr>
+          <th>Model</th><th>Measured</th><th class="n">Hit rate</th><th class="n">Median error</th><th class="n">Latency p50 / p95</th><th class="n">Tokens/s</th><th class="n">Malformed</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+      <p id="bench-grounding-empty" class="muted" hidden>No grounding results yet.</p>
+      <div id="bench-clicks-box" hidden>
+        <h3>Clicks</h3>
+        <table id="bench-clicks-table" class="cards">
+          <thead><tr><th>Model</th><th>Measured</th><th class="n">Hits</th><th class="n">Latency p50 / p95</th><th class="n">Malformed</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div id="bench-res-box" hidden>
+        <h3>Memory</h3>
+        <table id="bench-res-table" class="cards">
+          <thead><tr><th>Model</th><th>Mode</th><th>Measured</th><th class="n">GPU used</th><th class="n">Model VRAM</th><th class="n">Budget</th><th>Fits</th><th class="n">Server RSS</th><th class="n">Game RSS</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <details id="bench-markdown-box" hidden><summary>As markdown (what Write to docs puts in the bench block)</summary><pre id="bench-markdown" class="log-tail tall"></pre></details>
+    </div>
+  </section>
 </main>
 
 <aside id="logs" class="drawer" hidden aria-label="Logs">
@@ -338,6 +540,8 @@
       <option value="coop">coop</option>
       <option value="model">model</option>
       <option value="download">download</option>
+      <option value="bench">bench</option>
+      <option value="install">install</option>
       <option value="game">game</option>
       <option value="steam">steam</option>
       <option value="app">app</option>

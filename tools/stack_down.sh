@@ -15,9 +15,16 @@ stop() {  # stop <description> <pkill pattern args...>
   fi
 }
 
-# Agent runs (python -m sts_cua, sts_cua.supervisor, sts_cua.memory, sts_cua.eval) but not the control
-# app (python -m sts_cua.app). Same pattern as sts_cua.app.procs.AGENT_PATTERN.
-stop "agent runs" -f 'python[0-9.]* -m sts_cua(\.supervisor|\.memory|\.eval)?( |$)'
+# Agent runs (python -m sts_cua, sts_cua.supervisor, sts_cua.memory, sts_cua.eval, sts_cua.bench) but
+# not the control app (python -m sts_cua.app). Same pattern as sts_cua.app.procs.AGENT_PATTERN.
+stop "agent runs" -f 'python[0-9.]* -m sts_cua(\.supervisor|\.memory|\.eval|\.bench)?( |$)'
+# tools/install_llama_cpp.sh (the app's Install llama.cpp button, or by hand). When the script leads its
+# own process group (the app starts it in a new session; a terminal job too), the whole group goes, so a
+# running cmake or curl stops with it. Same pattern as sts_cua.app.procs.INSTALL_PATTERN.
+for pid in $(pgrep -f '^([^ ]*/)?(ba)?sh [^ ]*install_llama_cpp[.]sh( |$)'); do
+  log "stopping the llama.cpp install (pid $pid)"
+  if [ "$(ps -o pgid= -p "$pid" | tr -d ' ')" = "$pid" ]; then kill -TERM -- "-$pid" 2>/dev/null; else kill -TERM "$pid" 2>/dev/null; fi
+done
 # vLLM or llama-server (python -m sts_cua.serve, the app's Model server card, or by hand).
 # Same pattern as sts_cua.app.procs.MODEL_PATTERN.
 stop "local model server" -f 'vllm[ ]serve|vllm[.]entrypoints|^[^ ]*llama-server( |$)'

@@ -5,10 +5,12 @@
 
 (() => {
   const PROCESSES = ["steam", "xvfb", "game", "model", "supervisor"];
-  const TABS = ["control", "run", "results", "memory"];
+  const TABS = ["control", "run", "results", "memory", "bench"];
+  const LONG_JOBS = ["bench", "install"]; // busy values that leave Stack up and Stack down usable
   const STEP_PAGE = 50;
   const SHOT_URL = /^\/api\/runs\/[\w.-]+\/screenshots\/[\w.-]+\.png$/;
   const STEP_SHOT = /^screenshots\/([\w.-]+\.png)$/;
+  const SHEET_URL = /^\/api\/bench\/review\/sheet-\d+\.png\?v=\d+$/;
 
   // ---------- DOM helpers ----------
 
@@ -170,8 +172,9 @@
   let pollTimer = null;
 
   const loops = {
-    control: { fn: () => Promise.all([refreshStatus(), refreshModels()]), ms: () => 3000 },
-    run: { fn: () => refreshLive(), ms: () => (liveRunning ? 2000 : 10000) },
+    control: { fn: () => Promise.all([refreshStatus(), refreshModels(), refreshLlama()]), ms: () => 3000 },
+    run: { fn: () => Promise.all([refreshLive(), refreshRunModels()]), ms: () => (liveRunning ? 2000 : 10000) },
+    bench: { fn: () => refreshBench(), ms: () => (benchRunning ? 2000 : 8000) },
   };
 
   function stopPolling() {
@@ -216,6 +219,10 @@
     } else if (currentTab === "memory") {
       loadNotes();
       loadReflectRuns();
+    } else if (currentTab === "bench") {
+      loadBenchResults();
+    } else if (currentTab === "run") {
+      refreshRunModels(true).catch(() => {});
     }
     startPolling();
   }
@@ -265,7 +272,8 @@
     const badge = $("busy-badge");
     badge.hidden = !busy;
     badge.textContent = busy ? `busy: ${busy}` : "";
-    for (const id of ["stack-up", "stack-down"]) $(id).disabled = !!busy;
+    // A bench job or llama.cpp install can run for an hour: Stack down stays usable and stops it.
+    for (const id of ["stack-up", "stack-down"]) $(id).disabled = !!busy && !LONG_JOBS.includes(busy);
     renderModelButtons();
   }
 
@@ -319,6 +327,7 @@
     }
     renderModelInfo();
     renderModelButtons();
+    if (lastLlama) renderLlama(lastLlama);
   }
 
   function selectedModel() {
@@ -353,7 +362,7 @@
   }
 
   function renderModelButtons() {
-    const busy = !!(lastStatus && lastStatus.busy);
+    const busy = !!(lastStatus && lastStatus.busy && lastStatus.busy !== "bench"); // the server says when a bench job conflicts
     const procs = (lastStatus && lastStatus.processes) || {};
     const on = !!(procs.model && procs.model.running);
     $("model-start").disabled = busy || on;
@@ -362,6 +371,64 @@
     const downloading = !!(lastModels && lastModels.download && lastModels.download.running);
     $("model-download").disabled = !m || m.downloaded || downloading;
   }
+
+  // llama.cpp: is llama-server installed, and the Install button (tools/install_llama_cpp.sh)
+
+  let lastLlama = null;
+
+  async function refreshLlama() {
+    try {
+      lastLlama = await api("/api/llama");
+      renderLlama(lastLlama);
+      return lastLlama;
+    } catch (e) {
+      if (!(e instanceof AuthError)) setText("llama-line", e.message);
+      throw e;
+    }
+  }
+
+  function renderLlama(d) {
+    const inst = d.install || {};
+    let line;
+    if (inst.running) line = `Installing llama.cpp ${inst.prebuilt ? "(prebuilt release)" : "(building from source)"}${inst.since ? ", started " + ago(inst.since) : ""}. The whole log is under Logs > install.`;
+    else if (d.found) line = `llama-server: ${d.path}` + (d.version ? ` · version ${d.version}` : "") + (d.release ? ` · release ${d.release}` : "");
+    else line = "llama-server not found. Install it here (into ~/llama.cpp), or run tools/install_llama_cpp.sh.";
+    setText("llama-line", line);
+    $("llama-line").className = "small" + (d.found || inst.running ? "" : " warn-text");
+    const btn = $("llama-install");
+    btn.textContent = d.found ? "Update llama.cpp" : "Install llama.cpp";
+    const serverOn = !!(lastModels && lastModels.server && lastModels.server.running);
+    btn.disabled = !!inst.running || serverOn;
+    let hint = "";
+    if (serverOn && !inst.running) hint = "Stop the model server first: llama-server can't be replaced while it runs.";
+    else if (!inst.running && isNum(inst.exit_code) && inst.exit_code !== 0) {
+      hint = inst.exit_code < 0 ? "The last install was stopped." : `The last install failed (exit ${inst.exit_code}).`;
+      hint += inst.nvcc_missing
+        ? " nvcc (the CUDA toolkit) isn't installed in WSL: tick Prebuilt release, or install cuda-toolkit-12-x as below."
+        : " Its last lines are below.";
+    } else if (!inst.running && inst.exit_code === 0) hint = "The last install finished.";
+    else if (inst.nvcc_missing) hint = "nvcc (the CUDA toolkit) isn't installed in WSL: tick Prebuilt release, or install cuda-toolkit-12-x as below.";
+    $("llama-hint").hidden = !hint;
+    setText("llama-hint", hint);
+    const tail = inst.tail || [];
+    $("llama-tail").hidden = !tail.length;
+    $("llama-tail").textContent = tail.join("\n");
+  }
+
+  $("llama-install").addEventListener("click", async (ev) => {
+    const prebuilt = $("llama-prebuilt").checked;
+    const ok = await confirmDialog(
+      prebuilt ? "Install the prebuilt llama.cpp?" : "Build llama.cpp?",
+      prebuilt
+        ? "Downloads the newest llama.cpp release's Ubuntu CUDA 12.8 binaries and CUDA runtime into ~/llama.cpp/build/bin. No CUDA toolkit needed; the Windows driver must support CUDA 12.8."
+        : "Clones or updates llama.cpp in ~/llama.cpp and builds llama-server with CUDA for the RTX 4090. Needs git, cmake, g++ and the CUDA toolkit (nvcc) inside WSL, and takes several minutes.",
+      "Install",
+    );
+    if (!ok) return;
+    const button = ev.currentTarget;
+    await post(button, "/api/llama/install", { prebuilt }, "Installing llama.cpp in the background (Logs > install)");
+    refreshLlama().catch(() => {});
+  });
 
   function modLine(mod) {
     if (!mod || !mod.reachable) return "Mod: not reachable";
@@ -420,7 +487,8 @@
   let notesFetching = null;
 
   const FORM_KEY = "sts-cua.run-form";
-  const formFields = ["run-model", "run-thinking", "run-effort", "run-budget", "run-maxruns", "run-build", "run-memory"];
+  const formFields = ["run-model", "run-thinking", "run-effort", "run-local-thinking", "run-local-effort", "run-budget",
+    "run-maxruns", "run-build", "run-memory"];
 
   function saveForm() {
     try {
@@ -435,25 +503,104 @@
       const values = JSON.parse(localStorage.getItem(FORM_KEY) || "{}");
       for (const id of formFields) {
         if (!(id in values)) continue;
-        if ($(id).type === "checkbox") $(id).checked = !!values[id];
-        else $(id).value = values[id];
+        setField(id, values[id]);
       }
     } catch (e) { /* storage unavailable */ }
+  }
+
+  // A saved select value whose option isn't there yet (local models come from /api/models) waits in data-want.
+  function setField(id, value) {
+    const el = $(id);
+    if (el.type === "checkbox") { el.checked = !!value; return; }
+    if (el.tagName === "SELECT" && ![...el.options].some((o) => o.value === value)) { el.dataset.want = value; return; }
+    el.value = value;
+  }
+
+  // Local models (the registry, from /api/models) and the model server, for the Run tab's options and hints.
+  let runModels = null;
+  let runModelsAt = 0;
+
+  async function refreshRunModels(force = false) {
+    if (!force && runModels && Date.now() - runModelsAt < 10000) return runModels;
+    try {
+      runModels = await api("/api/models");
+      runModelsAt = Date.now();
+    } catch (e) {
+      if (e instanceof AuthError) throw e;
+      return runModels;
+    }
+    for (const id of ["run-model", "coop-model"]) fillLocalOptions($(id), runModels.models || []);
+    updateRunHint();
+    updateCoopHint();
+    return runModels;
+  }
+
+  function fillLocalOptions(select, rows) {
+    const group = select.querySelector("optgroup.local-models");
+    const label = (m) => m.name + (m.downloaded ? "" : " (not downloaded)");
+    const same = group.children.length === rows.length
+      && rows.every((m, i) => group.children[i].value === m.name && group.children[i].textContent === label(m));
+    if (same) return;
+    const keep = select.dataset.want || select.value;
+    group.replaceChildren(...rows.map((m) => h("option", { value: m.name, text: label(m) })));
+    if ([...select.options].some((o) => o.value === keep)) select.value = keep;
+    delete select.dataset.want;
+  }
+
+  const localInfo = (name) => (runModels && (runModels.models || []).find((m) => m.name === name)) || null;
+  const isLocal = (name) => !!name && !name.startsWith("claude-") && name !== "scripted";
+
+  // Thinking select: "" is the factory's default (co-op: off; else the registry's). Effort needs thinking on.
+  function syncLocalControls(thinkId, effortId, model, coop) {
+    const m = localInfo(model);
+    const think = $(thinkId);
+    const effort = $(effortId);
+    const hasThinking = !m || m.thinking;
+    if (!hasThinking) think.value = "";
+    think.disabled = !hasThinking;
+    think.options[0].textContent = !hasThinking ? "none (no thinking)"
+      : coop ? "default (off in co-op)" : m ? `default (${m.thinking ? "on" : "off"})` : "default";
+    const on = think.value === "on" || (think.value === "" && !coop && !!(m && m.thinking));
+    effort.disabled = !hasThinking || !on;
+    if (effort.disabled) effort.value = "";
+  }
+
+  // Whether the model server serves the selected local model: [text, problem].
+  function serverHint(model) {
+    const srv = runModels && runModels.server;
+    if (!srv) return ["Needs the model server (Control tab).", false];
+    if (!srv.running) return [`No model server is running: start ${model} in the Control tab first.`, true];
+    if (!srv.ready) return [`The model server is still loading ${dash(srv.model)}.`, true];
+    if (srv.model && srv.model !== model) return [`The model server is serving ${srv.model}, not ${model}: stop it and start ${model} in the Control tab.`, true];
+    return [`The model server is serving it (${dash(srv.mode)} mode). Local runs cost nothing.`, false];
+  }
+
+  function localBody(prefix, model) {
+    if (!isLocal(model)) return {};
+    return { local_thinking: $(prefix + "-local-thinking").value || null, local_effort: $(prefix + "-local-effort").value || null };
   }
 
   function updateRunHint() {
     const model = $("run-model").value;
     const claude = model.startsWith("claude-");
+    const local = isLocal(model);
     $("run-thinking").disabled = !claude;
     $("run-effort").disabled = !claude;
+    $("run-claude").hidden = !claude;
+    $("run-local").hidden = !local;
     let hint = "";
-    if (model === "qwen3-vl-8b") hint = "Needs the model server running (Control tab). Local runs cost nothing.";
-    else if (model === "scripted") hint = "Scripted runs make no model calls.";
+    let problem = false;
+    if (local) {
+      syncLocalControls("run-local-thinking", "run-local-effort", model, false);
+      [hint, problem] = serverHint(model);
+    } else if (model === "scripted") hint = "Scripted runs make no model calls.";
     else hint = "Thinking and effort apply to Claude models only.";
     setText("run-hint", hint);
+    $("run-hint").className = "small " + (problem ? "warn-text" : "muted");
   }
 
   $("run-model").addEventListener("change", updateRunHint);
+  $("run-local-thinking").addEventListener("change", updateRunHint);
 
   $("run-form").addEventListener("submit", async (ev) => {
     ev.preventDefault();
@@ -470,6 +617,7 @@
       max_runs: Number.isFinite(maxRuns) && maxRuns > 0 ? maxRuns : null,
       memory: $("run-memory").checked,
       game_build: $("run-build").value.trim() || null,
+      ...localBody("run", $("run-model").value),
     };
     saveForm();
     const data = await post($("run-start"), "/api/runs/start", body);
@@ -488,7 +636,8 @@
   // Co-op: one agent session playing with Raph (python -m sts_cua --coop), not the supervisor.
 
   const COOP_KEY = "sts-cua.coop-form";
-  const coopFields = ["coop-model", "coop-thinking", "coop-effort", "coop-cost", "coop-idle", "coop-build", "coop-rules"];
+  const coopFields = ["coop-model", "coop-thinking", "coop-effort", "coop-local-thinking", "coop-local-effort", "coop-cost",
+    "coop-idle", "coop-build", "coop-rules"];
 
   function saveCoop() {
     try {
@@ -503,19 +652,31 @@
       const values = JSON.parse(localStorage.getItem(COOP_KEY) || "{}");
       for (const id of coopFields) {
         if (!(id in values)) continue;
-        if ($(id).type === "checkbox") $(id).checked = !!values[id];
-        else $(id).value = values[id];
+        setField(id, values[id]);
       }
     } catch (e) { /* storage unavailable */ }
   }
 
   function updateCoopHint() {
-    const claude = $("coop-model").value.startsWith("claude-");
+    const model = $("coop-model").value;
+    const claude = model.startsWith("claude-");
+    const local = isLocal(model);
     $("coop-thinking").disabled = !claude;
     $("coop-effort").disabled = !claude;
+    for (const el of document.querySelectorAll("#coop-form .claude-only")) el.hidden = !claude;
+    for (const el of document.querySelectorAll("#coop-form .local-only")) el.hidden = !local;
+    let hint = "";
+    let problem = false;
+    if (local) {
+      syncLocalControls("coop-local-thinking", "coop-local-effort", model, true);
+      [hint, problem] = serverHint(model);
+    }
+    setText("coop-hint", hint);
+    $("coop-hint").className = "small " + (problem ? "warn-text" : "muted");
   }
 
   $("coop-model").addEventListener("change", updateCoopHint);
+  $("coop-local-thinking").addEventListener("change", updateCoopHint);
 
   $("coop-form").addEventListener("submit", async (ev) => {
     ev.preventDefault();
@@ -535,6 +696,7 @@
       idle_minutes: idle,
       rules: $("coop-rules").checked,
       game_build: $("coop-build").value.trim() || null,
+      ...localBody("coop", $("coop-model").value),
     };
     saveCoop();
     const data = await post($("coop-start"), "/api/coop/start", body);
@@ -1076,6 +1238,442 @@
   $("notes-status").addEventListener("change", loadNotes);
   $("notes-refresh").addEventListener("click", loadNotes);
 
+  // ---------- Bake-off ----------
+  // Each button runs one `python -m sts_cua.bench` job in the background (one at a time); the job card tails it.
+
+  const ACTION_LABELS = {
+    extract: "Extract targets", review: "Contact sheets", delete: "Delete targets", grounding: "Grounding",
+    baseline: "Baseline", resources: "Resources", clicks: "Clicks", write_docs: "Write to docs", external: "Bench job",
+  };
+  const BENCH_KEY = "sts-cua.bench-form";
+  const benchFields = ["bench-mode", "bench-limit", "bench-serve", "bench-res-model", "bench-res-mode", "bench-res-game",
+    "bench-res-serve", "bench-clicks-model", "bench-clicks-n"];
+
+  let lastBench = null;
+  let benchRunning = false;
+  let benchModelsKey = "";
+  let benchSheetsKey = "";
+  let benchTargetsKey = "";
+  let benchChecked = new Set(); // grounding models ticked
+  const benchSelected = new Set(); // target ids ticked for deletion
+
+  const pct = (v) => (isNum(v) ? `${Math.round(v * 100)}%` : "-");
+  const secs = (a, b) => `${fixed(a, 2)} / ${fixed(b, 2)} s`;
+
+  function saveBench() {
+    try {
+      const values = { models: [...benchChecked] };
+      for (const id of benchFields) values[id] = $(id).type === "checkbox" ? $(id).checked : $(id).value;
+      localStorage.setItem(BENCH_KEY, JSON.stringify(values));
+    } catch (e) { /* storage unavailable */ }
+  }
+
+  function restoreBench() {
+    try {
+      const values = JSON.parse(localStorage.getItem(BENCH_KEY) || "{}");
+      if (Array.isArray(values.models)) benchChecked = new Set(values.models.filter((m) => typeof m === "string"));
+      for (const id of benchFields) if (id in values) setField(id, values[id]);
+    } catch (e) { /* storage unavailable */ }
+  }
+
+  async function refreshBench() {
+    let d;
+    try {
+      d = await api("/api/bench");
+    } catch (e) {
+      if (!(e instanceof AuthError)) setText("bench-job-line", e.message);
+      throw e;
+    }
+    const was = benchRunning;
+    benchRunning = !!(d.job && d.job.running);
+    lastBench = d;
+    renderBench(d);
+    if (was && !benchRunning) loadBenchResults();
+    return d;
+  }
+
+  function exitText(last) {
+    if (last.running) return "running";
+    const code = last.exit_code;
+    if (!isNum(code)) return "finished";
+    if (code === 0) return "finished";
+    return code < 0 ? `stopped (signal ${-code})` : `failed (exit ${code})`;
+  }
+
+  function renderBench(d) {
+    renderBenchJob(d);
+    renderBenchTargets(d.targets || {});
+    renderBenchModels(d);
+    renderBenchBaselines(d.baselines || {});
+    if (d.clicks_display) setText("bench-clicks-display", d.clicks_display);
+    updateBenchHints();
+  }
+
+  function renderBenchJob(d) {
+    const job = d.job || {};
+    const last = d.last;
+    const badge = $("bench-job-badge");
+    let state = "idle";
+    let cls = "";
+    if (job.running) { state = "running"; cls = "accent"; }
+    else if (last) {
+      state = exitText(last);
+      cls = state === "finished" ? "ok" : state.startsWith("failed") ? "bad" : "warn";
+    }
+    badge.textContent = state;
+    badge.className = "badge " + cls;
+    $("bench-stop").disabled = !job.running;
+
+    const line = $("bench-job-line");
+    if (job.running) {
+      const what = ACTION_LABELS[job.action] || dash(job.action);
+      line.replaceChildren(`${what}, started ${ago(job.since)}${job.pid ? " · pid " + job.pid : ""}`
+        + (job.external ? " (started outside the app; its output isn't shown here)" : ""));
+    } else if (last) {
+      line.replaceChildren(`Last: ${ACTION_LABELS[last.action] || dash(last.action)}, ${localTime(last.started_at)}, ${exitText(last)}. `);
+    } else {
+      line.replaceChildren("No bench job has run yet. Each button below runs one ", h("code", { text: "python -m sts_cua.bench" }), " job; one at a time.");
+    }
+    if (last && Array.isArray(last.argv) && !(job.running && job.external)) {
+      line.append(h("code", { class: "argv", text: ["python", ...last.argv.slice(1)].join(" ") }));
+    }
+    line.className = "small" + (job.running ? "" : " muted");
+
+    const pre = $("bench-output");
+    const lines = (last && last.output) || [];
+    const show = !!last && !(job.running && job.external);
+    pre.hidden = !show;
+    if (show) {
+      const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
+      const text = lines.length ? lines.join("\n") : "(no output yet)";
+      if (pre.textContent !== text) {
+        pre.textContent = text;
+        if (atBottom || job.running) pre.scrollTop = pre.scrollHeight;
+      }
+    }
+
+    const box = $("bench-changed");
+    const ch = last && last.action === "write_docs" && !last.running ? last : null;
+    box.hidden = !ch;
+    if (ch) {
+      if (!ch.changed) {
+        box.replaceChildren(h("p", { class: "muted small", text: "The report didn't say what it changed; see Logs > bench." }));
+      } else {
+        const rows = ch.changed.rows || [];
+        const diff = ch.changed.diff || [];
+        box.replaceChildren(
+          h("p", { class: "small", text: rows.length ? `Measured rows filled in docs/hosting.md: ${rows.join(", ")}.`
+            : "No measure rows filled; only the bench block was rewritten." }),
+          diff.length
+            ? h("pre", { class: "log-tail diff" }, diff.map((l) => h("span", { class: l.startsWith("+") ? "add" : l.startsWith("-") ? "del" : null, text: l + "\n" })))
+            : h("p", { class: "muted small", text: "docs/hosting.md is unchanged." }),
+        );
+      }
+    }
+  }
+
+  function renderBenchTargets(t) {
+    setText("bench-target-count", `${t.count || 0} targets` + (t.rejected ? ` · ${t.rejected} deleted` : ""));
+    let hint = "";
+    let warn = false;
+    const sheets = t.sheets || [];
+    if (t.error) { hint = t.error; warn = true; }
+    else if (!t.count) hint = "No targets yet: Extract targets reads the Claude runs in runs/.";
+    else if (t.sheets_stale) { hint = "The contact sheets are older than the targets: Make contact sheets to see the new ones."; warn = true; }
+    else if (!sheets.length) hint = "No contact sheets yet: Make contact sheets.";
+    const hintEl = $("bench-target-hint");
+    hintEl.hidden = !hint;
+    hintEl.textContent = hint;
+    hintEl.className = "small " + (warn ? "warn-text" : "muted");
+
+    const urls = sheets.filter((s) => typeof s.url === "string" && SHEET_URL.test(s.url));
+    const key = urls.map((s) => s.url).join(" ");
+    if (key !== benchSheetsKey) {
+      benchSheetsKey = key;
+      $("bench-sheets").replaceChildren(...urls.map((s) => h("figure", { class: "sheet" },
+        h("a", { href: s.url, target: "_blank", rel: "noopener" }, h("img", { src: s.url, alt: `Contact sheet ${s.name}`, loading: "lazy" })),
+        h("figcaption", { class: "muted small", text: s.name }))));
+    }
+
+    const items = t.items || [];
+    const tkey = items.map((i) => i.id).join(" ");
+    if (tkey !== benchTargetsKey) {
+      benchTargetsKey = tkey;
+      for (const id of [...benchSelected]) if (!items.some((i) => i.id === id)) benchSelected.delete(id);
+      $("bench-target-list").replaceChildren(...items.map((i) => h("li", { "data-target": i.id },
+        h("label", { class: "check small" },
+          h("input", { type: "checkbox", value: i.id, checked: benchSelected.has(i.id), onchange: (ev) => {
+            if (ev.currentTarget.checked) benchSelected.add(i.id); else benchSelected.delete(i.id);
+            updateDeleteButton();
+          } }),
+          h("span", { class: "nid", text: i.id }),
+          h("span", { text: i.instruction || "" })))));
+      filterTargets();
+    }
+    updateDeleteButton();
+  }
+
+  function filterTargets() {
+    const q = $("bench-filter").value.trim().toLowerCase();
+    for (const li of $("bench-target-list").children) li.hidden = !!q && !li.textContent.toLowerCase().includes(q);
+  }
+
+  function updateDeleteButton() {
+    const n = benchSelected.size;
+    $("bench-delete").disabled = !n || benchRunning;
+    $("bench-delete").textContent = n ? `Delete ${n} selected` : "Delete selected";
+  }
+
+  function modelNote(m) {
+    const fits = ["coop", "solo", "max"].filter((mode) => m.fits && m.fits[mode]).map((mode) => (mode === "coop" ? "co-op" : mode));
+    return `${m.need_gib.toFixed(1)} GiB · fits ${fits.join(", ") || "none"}${m.downloaded ? "" : " · not downloaded"}`;
+  }
+
+  function renderBenchModels(d) {
+    const models = d.models || { local: [], reference: [] };
+    const key = JSON.stringify(models);
+    if (key === benchModelsKey) return;
+    benchModelsKey = key;
+    const local = models.local || [];
+    const refs = models.reference || [];
+    const check = (name, note, api) => h("label", { class: "check model-check" },
+      h("input", { type: "checkbox", value: name, checked: benchChecked.has(name), onchange: (ev) => {
+        if (ev.currentTarget.checked) benchChecked.add(name); else benchChecked.delete(name);
+        saveBench();
+        updateBenchHints();
+      } }),
+      h("span", null, h("span", { class: "mname", text: name }), " ",
+        api ? h("span", { class: "badge warn", text: "API credits" }) : null,
+        h("span", { class: "muted small mnote", text: note })));
+    $("bench-models").replaceChildren(
+      ...local.map((m) => check(m.name, modelNote(m), false)),
+      ...refs.map((name) => check(name, "Claude reference", true)));
+
+    const fill = (id, options) => {
+      const sel = $(id);
+      const keep = sel.dataset.want || sel.value;
+      sel.replaceChildren(...options.map(([value, text]) => h("option", { value, text })));
+      if (options.some(([value]) => value === keep)) sel.value = keep;
+      delete sel.dataset.want;
+    };
+    fill("bench-res-model", local.map((m) => [m.name, m.name + (m.downloaded ? "" : " (not downloaded)")]));
+    fill("bench-clicks-model", [...local.map((m) => [m.name, m.name]), ...refs.map((n) => [n, `${n} (API credits)`])]);
+  }
+
+  function renderBenchBaselines(b) {
+    $("bench-baselines").replaceChildren(...["desktop", "pre-server"].map((label) => {
+      const x = b[label];
+      const text = x
+        ? `${localTime(x.time)}` + (isNum(x.gpu_used_mib) ? ` · GPU ${gib(x.gpu_used_mib)} GiB` : " · no GPU reading")
+          + (isNum(x.ram_used_mib) ? ` · RAM ${gib(x.ram_used_mib)} GiB` : "") + (x.mode ? ` · ${x.mode}` : "")
+        : "not taken yet";
+      return h("li", { "data-baseline": label }, h("span", { class: "mname", text: label + ": " }), h("span", { class: x ? "" : "muted", text }));
+    }));
+  }
+
+  const benchLocalNames = () => new Set(((lastBench && lastBench.models && lastBench.models.local) || []).map((m) => m.name));
+
+  // What the model server does for a job on `model` without "start it for me": [text, problem].
+  function benchServerHint(model, untick) {
+    const srv = (lastBench && lastBench.server) || {};
+    if (!srv.running) return [`No model server is running: start ${model} in the Control tab${untick ? ", or tick " + untick : ""}.`, true];
+    if (srv.model && srv.model !== model) return [`The model server is serving ${srv.model}, not ${model}.`, true];
+    return [`Uses the running model server (${dash(srv.model)}).`, false];
+  }
+
+  function setHint(id, parts, problem) {
+    setText(id, parts.filter(Boolean).join(" "));
+    $(id).className = "small " + (problem ? "warn-text" : "muted");
+  }
+
+  function updateBenchHints() {
+    if (!lastBench) return;
+    const locals = benchLocalNames();
+    const srv = lastBench.server || {};
+    const running = benchRunning;
+    for (const id of ["bench-extract", "bench-review", "bench-grounding-run", "bench-baseline-desktop",
+      "bench-baseline-pre", "bench-res-run", "bench-clicks-run", "bench-write-docs"]) $(id).disabled = running;
+    updateDeleteButton();
+    const busyNote = running ? "A bench job is running; wait for it or stop it." : "";
+
+    // Grounding
+    const picked = [...$("bench-models").querySelectorAll("input:checked")].map((i) => i.value);
+    const local = picked.filter((m) => locals.has(m));
+    const refs = picked.filter((m) => !locals.has(m));
+    const serve = $("bench-serve").checked;
+    const parts = [busyNote];
+    let problem = false;
+    if (!picked.length) { parts.push("Pick at least one model."); problem = true; }
+    if (refs.length) parts.push(`${refs.join(" and ")} cost${refs.length === 1 ? "s" : ""} API credits (one request per target).`);
+    if (local.length && serve) {
+      parts.push(`Starts each local model in ${$("bench-mode").value} mode in turn, stopping the model server between them`
+        + (srv.running ? ` (${dash(srv.model)} first).` : "."));
+    } else if (local.length > 1) {
+      parts.push("Only one model server runs at a time: tick Start each model for me."); problem = true;
+    } else if (local.length === 1) {
+      const [text, bad] = benchServerHint(local[0], "Start each model for me");
+      parts.push(text); problem = problem || bad;
+    }
+    setHint("bench-grounding-hint", parts, problem);
+    $("bench-grounding-run").disabled = running || !picked.length;
+
+    // Resources
+    const resModel = $("bench-res-model").value;
+    const resParts = [busyNote];
+    let resProblem = false;
+    if (!lastBench.baselines || !lastBench.baselines["pre-server"]) resParts.push("No pre-server baseline yet: the model's VRAM will be missing.");
+    if ($("bench-res-serve").checked) {
+      if (srv.running) { resParts.push(`Stop the model server (${dash(srv.model)}) first, or untick Start it for me.`); resProblem = true; }
+      else resParts.push(`Starts ${resModel} in ${$("bench-res-mode").value} mode, measures, and leaves it running.`);
+    } else if (resModel) {
+      const [text, bad] = benchServerHint(resModel, "Start it for me");
+      resParts.push(text); resProblem = bad;
+    }
+    if (srv.running) resParts.push("Baselines need the model server stopped.");
+    setHint("bench-res-hint", resParts, resProblem);
+
+    // Clicks
+    const clicksModel = $("bench-clicks-model").value;
+    const clickParts = [busyNote];
+    let clickProblem = false;
+    if (locals.has(clicksModel)) {
+      const [text, bad] = benchServerHint(clicksModel, "");
+      clickParts.push(text); clickProblem = bad;
+    } else if (clicksModel) clickParts.push(`${clicksModel} costs API credits (one request per click).`);
+    setHint("bench-clicks-hint", clickParts, clickProblem);
+  }
+
+  async function benchPost(button, action, body, message) {
+    const data = await post(button, `/api/bench/${action}`, body, message);
+    if (data) {
+      benchRunning = true;
+      startPolling(); // refresh now, then every 2 s while it runs
+    }
+    return data;
+  }
+
+  $("bench-extract").addEventListener("click", (ev) => benchPost(ev.currentTarget, "extract", {}, "Extracting targets from the Claude runs"));
+  $("bench-review").addEventListener("click", (ev) => benchPost(ev.currentTarget, "review", {}, "Making contact sheets"));
+  $("bench-filter").addEventListener("input", filterTargets);
+  $("bench-delete").addEventListener("click", async (ev) => {
+    const ids = [...benchSelected];
+    if (!ids.length) return;
+    const ok = await confirmDialog(`Delete ${ids.length} target${ids.length === 1 ? "" : "s"}?`,
+      `They are removed from bench/targets.jsonl with their images, and remembered in bench/rejected.txt so Extract never brings them back. The contact sheets are remade.\n\n${ids.slice(0, 12).join("\n")}${ids.length > 12 ? "\n..." : ""}`,
+      "Delete");
+    if (!ok) return;
+    const data = await benchPost(ev.currentTarget, "delete", { ids }, `Deleting ${ids.length} target${ids.length === 1 ? "" : "s"}`);
+    if (data) benchSelected.clear();
+  });
+
+  $("bench-grounding").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const locals = benchLocalNames();
+    const models = [...$("bench-models").querySelectorAll("input:checked")].map((i) => i.value);
+    const refs = models.filter((m) => !locals.has(m));
+    const limit = parseInt($("bench-limit").value, 10);
+    const n = lastBench && lastBench.targets ? lastBench.targets.count : 0;
+    const per = Number.isFinite(limit) && limit > 0 ? Math.min(limit, n || limit) : n;
+    if (refs.length) {
+      const ok = await confirmDialog("This costs API credits",
+        `${refs.join(" and ")} will get one request per target (${per} each).`, "Run grounding");
+      if (!ok) return;
+    }
+    saveBench();
+    await benchPost($("bench-grounding-run"), "grounding", {
+      models, mode: $("bench-mode").value, serve: $("bench-serve").checked,
+      limit: Number.isFinite(limit) && limit > 0 ? limit : null,
+    }, `Grounding ${models.join(", ")}`);
+  });
+  for (const id of ["bench-serve", "bench-mode", "bench-res-model", "bench-res-mode", "bench-res-serve", "bench-res-game",
+    "bench-clicks-model", "bench-clicks-n", "bench-limit"]) {
+    $(id).addEventListener("change", () => { saveBench(); updateBenchHints(); });
+  }
+
+  $("bench-baseline-desktop").addEventListener("click", (ev) => benchPost(ev.currentTarget, "baseline", { label: "desktop" }, "Taking the desktop baseline"));
+  $("bench-baseline-pre").addEventListener("click", (ev) => benchPost(ev.currentTarget, "baseline", { label: "pre-server", mode: $("bench-res-mode").value }, "Taking the pre-server baseline"));
+  $("bench-res-run").addEventListener("click", (ev) => {
+    saveBench();
+    benchPost(ev.currentTarget, "resources", {
+      model: $("bench-res-model").value, mode: $("bench-res-mode").value,
+      game: $("bench-res-game").checked, serve: $("bench-res-serve").checked,
+    }, `Measuring ${$("bench-res-model").value}`);
+  });
+  $("bench-clicks-run").addEventListener("click", (ev) => {
+    let n = parseInt($("bench-clicks-n").value, 10);
+    if (!Number.isFinite(n)) n = 20;
+    n = Math.min(Math.max(n, 1), 100);
+    $("bench-clicks-n").value = String(n);
+    saveBench();
+    benchPost(ev.currentTarget, "clicks", { model: $("bench-clicks-model").value, n }, `Clicking with ${$("bench-clicks-model").value}`);
+  });
+  $("bench-write-docs").addEventListener("click", async (ev) => {
+    const ok = await confirmDialog("Write the results to docs/hosting.md?",
+      "Rewrites the bench block (\"Measured on the PC\") and fills the **measure** rows that now have a measurement. Other text stays. The changed lines show in the job card.",
+      "Write to docs");
+    if (!ok) return;
+    benchPost(ev.currentTarget, "write-docs", {}, "Writing the report to docs/hosting.md");
+  });
+  $("bench-stop").addEventListener("click", async (ev) => {
+    const data = await post(ev.currentTarget, "/api/bench/stop", {}, "Stopping the bench job");
+    if (data) setTimeout(startPolling, 1000);
+  });
+  $("bench-results-refresh").addEventListener("click", loadBenchResults);
+
+  async function loadBenchResults() {
+    try {
+      renderBenchResults(await api("/api/bench/results"));
+    } catch (e) {
+      report(e);
+    }
+  }
+
+  function fitShort(f) {
+    if (!f || f.how === "api") return "API";
+    return `${f.fits ? "yes" : "no"} (${f.how} ${fixed(f.need_gib, 1)} GiB)`;
+  }
+
+  function renderBenchResults(r) {
+    const ranking = r.ranking || [];
+    const rec = r.recommended || {};
+    setText("bench-recommended", ranking.length
+      ? `Recommended: co-op ${rec.coop || "none that fits"}, solo ${rec.solo || "none that fits"}.`
+      : "No grounding results yet: run Grounding.");
+    $("bench-ranking").replaceChildren(...ranking.map((x) => h("li", { "data-model": x.model },
+      h("strong", { text: x.model }), x.local ? null : h("span", { class: "badge", text: "API" }),
+      h("span", { text: ` ${pct(x.hit_rate)} hits, ${fixed(x.latency_p50_s, 2)} s median · co-op ${fitShort(x.fits && x.fits.coop)}, solo ${fitShort(x.fits && x.fits.solo)}` }))));
+
+    const td = (label, content, cls) => h("td", { "data-label": label, class: cls || null, text: content });
+    const g = r.grounding || [];
+    $("bench-grounding-table").querySelector("tbody").replaceChildren(...g.map((x) => h("tr", { "data-model": x.model },
+      td("Model", x.model + (x.local ? "" : " (API)")), td("Measured", localTime(x.created_at)),
+      td("Hit rate", `${pct(x.hit_rate)} (${dash(x.hits)}/${dash(x.answered)})`, "n"),
+      td("Median error", isNum(x.median_error_px) ? `${x.median_error_px.toFixed(1)} px` : "-", "n"),
+      td("Latency p50 / p95", secs(x.latency_p50_s, x.latency_p95_s), "n"),
+      td("Tokens/s", fixed(x.tokens_per_s, 1), "n"), td("Malformed", dash(x.malformed), "n"))));
+    $("bench-grounding-table").hidden = !g.length;
+    $("bench-grounding-empty").hidden = g.length > 0;
+
+    const c = r.clicks || [];
+    $("bench-clicks-box").hidden = !c.length;
+    $("bench-clicks-table").querySelector("tbody").replaceChildren(...c.map((x) => h("tr", { "data-model": x.model },
+      td("Model", x.model), td("Measured", localTime(x.created_at)), td("Hits", `${dash(x.hits)}/${dash(x.answered)}`, "n"),
+      td("Latency p50 / p95", secs(x.latency_p50_s, x.latency_p95_s), "n"), td("Malformed", dash(x.malformed), "n"))));
+
+    const res = r.resources || [];
+    $("bench-res-box").hidden = !res.length;
+    const g1 = (v) => (isNum(v) ? `${v.toFixed(1)} GiB` : "-");
+    $("bench-res-table").querySelector("tbody").replaceChildren(...res.map((x) => h("tr", { "data-model": x.model },
+      td("Model", x.model), td("Mode", x.mode === "coop" ? "co-op" : dash(x.mode)), td("Measured", localTime(x.created_at)),
+      td("GPU used", `${fixed(x.vram_used_gib, 1)} / ${fixed(x.vram_total_gib, 1)} GiB`, "n"),
+      td("Model VRAM", g1(x.model_vram_gib), "n"), td("Budget", g1(x.budget_gib), "n"),
+      td("Fits", x.fits == null ? "-" : x.fits ? "yes" : "no"),
+      td("Server RSS", g1(x.server_rss_gib), "n"), td("Game RSS", g1(x.game_rss_gib), "n"))));
+
+    $("bench-markdown-box").hidden = !r.markdown;
+    $("bench-markdown").textContent = r.markdown || "";
+  }
+
   // ---------- Logs drawer ----------
 
   let logTimer = null;
@@ -1125,5 +1723,6 @@
   updateRunHint();
   restoreCoop();
   updateCoopHint();
+  restoreBench();
   route();
 })();

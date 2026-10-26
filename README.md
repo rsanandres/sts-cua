@@ -269,7 +269,7 @@ To check on the PC: the waiting and vote screens, whether a teammate's map vote 
 
 ## Control app
 
-One page to run everything from the PC or the phone: start and stop the stack and the local model, start and stop supervisor sessions, watch the live run and screen, read results, spend and logs, and retire notes or reflect on a run.
+One page to run everything from the PC or the phone: start and stop the stack and the local model, install llama.cpp, start and stop supervisor sessions, watch the live run and screen, run the local-model bake-off, read results, spend and logs, and retire notes or reflect on a run. No terminal needed.
 
 ```
 .venv/bin/python -m sts_cua.app          # http://127.0.0.1:8765, prints the token on first start
@@ -279,13 +279,16 @@ On Windows, `tools/windows/sts-cua-app.cmd` starts the server in WSL if it isn't
 
 - Stdlib only (`ThreadingHTTPServer`), bound to 127.0.0.1. Every `/api/` call except `/api/health` needs the token in `~/.sts-cua/app-token` (mode 600), as a Bearer header or the HttpOnly, SameSite=Strict cookie that `/login?token=...` sets. No localhost exemption, since `tailscale serve` traffic also arrives from localhost. POSTs must be JSON.
 - Fixed actions only: argv lists built from validated fields (model allowlist, clamped numbers, names matching `^[\w.-]+$`, paths kept inside `runs/`), never a command string from a request.
-- Children it starts (supervisor, the model server, model downloads, `stack_up.sh`, reflect) get pid files in `~/.sts-cua/run/`, so a restarted app still knows them, and log to `~/.sts-cua/logs/`. Processes started elsewhere are found with pgrep.
-- `tools/stack_down.sh` stops agent runs with a pattern that leaves `python -m sts_cua.app` running.
+- Children it starts (supervisor, the model server, model downloads, `stack_up.sh`, reflect, bench jobs, the llama.cpp install) get pid files in `~/.sts-cua/run/`, so a restarted app still knows them, and log to `~/.sts-cua/logs/`. Processes started elsewhere are found with pgrep.
+- `tools/stack_down.sh` stops agent runs and bench jobs with a pattern that leaves `python -m sts_cua.app` running, and a llama.cpp install with its build.
+- **Control > Model server** also shows whether `llama-server` is found (path and version) and has **Install llama.cpp** (`tools/install_llama_cpp.sh`; tick Prebuilt release for the binaries that need no CUDA toolkit). It runs in the background with its log under Logs > install; when it stops because `nvcc` is missing, the card shows the script's last lines. Not while a model server runs.
+- **Run** with a local model: the Claude-only thinking and effort give way to the local thinking switch (`--local-thinking`) and reasoning effort (`--local-effort`, with thinking on, for models that have a thinking mode). The hint says when no model server runs or it serves a different model.
+- **Bake-off** runs each `python -m sts_cua.bench` command as one background job (one at a time, log `bench`, stopped by Stack down): extract targets, look at the contact sheets and delete bad targets, grounding on any mix of local models and the Claude references (marked as costing API credits; "start each model for me" is `--serve`), baselines and resources, live clicks on `:98`, and the newest results with the ranking and **Write to docs**, which shows the `docs/hosting.md` lines it changed. Jobs that need a model server check that it serves the model they test; `--serve` jobs wait for the app's own model start and an install, and the other way round.
 - `src/sts_cua/app/`: `server.py` (HTTP, auth, static page), `routes.py` (endpoints), `procs.py` (processes), `files.py` (tailing logs, run dirs), `static/` (the page).
 
 ## Bake-off
 
-Which local model clicks best and fits next to the games: `python -m sts_cua.bench` (`src/sts_cua/bench/`). On the PC, from the repo:
+Which local model clicks best and fits next to the games: `python -m sts_cua.bench` (`src/sts_cua/bench/`), or the same from the control app's Bake-off tab. On the PC, from the repo:
 
 ```
 # Targets, once (again after new Claude runs): clicks Claude made that changed the screen.

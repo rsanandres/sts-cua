@@ -28,7 +28,8 @@ TOKEN = "test-token"
 COOKIE = "sts_cua_token"
 SAFE = re.compile(r"^[\w.-]+$")
 XSS = '<script>window.__xss = 1</script><img src=x onerror="window.__xss = 2">'
-LOGS = ("steam", "game", "model", "download", "vllm", "supervisor", "app", "coop")
+LOGS = ("steam", "game", "model", "download", "vllm", "supervisor", "app", "coop", "bench", "install")
+BENCH_ACTIONS = ("extract", "review", "delete", "grounding", "baseline", "resources", "clicks", "write-docs")
 CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8"}
 
 NOW = datetime(2026, 10, 25, 18, 0, tzinfo=timezone.utc)
@@ -154,6 +155,48 @@ def make_evals() -> dict[str, dict]:
     return {plan["name"]: {"plan": plan, "results": results, "report": report}}
 
 
+def make_targets() -> list[dict]:
+    out = []
+    for i in range(1, 31):
+        run = "20261025T181542Z" if i <= 20 else "20261025T164617Z"
+        text = "Click the End Turn button" if i % 3 == 0 else f"Play card {i % 5 + 1} on the Nibbit"
+        if i == 7:
+            text = "Click " + XSS
+        out.append({"id": f"{run}-{i:04d}", "instruction": text, "state_type": "monster", "check": "card_played"})
+    return out
+
+
+def bench_results() -> dict:
+    def g(model, local, hits, p50, tps, **extra):
+        return {"model": model, "local": local, "created_at": iso(300), "game_build": "v0.107.1", "targets": 40,
+                "hit_rate": hits / 40, "hits": hits, "answered": 40, "errors": 0, "malformed": 1,
+                "median_error_px": 14.5, "latency_p50_s": p50, "latency_p95_s": p50 * 1.8, "tokens_per_s": tps,
+                "dir": "20261026T100000Z", **extra}
+
+    def fits(coop, solo, need, how="est."):
+        return {"coop": {"fits": coop, "need_gib": need, "how": how}, "solo": {"fits": solo, "need_gib": need, "how": how}}
+
+    return {
+        "grounding": [g("claude-haiku-5-5", False, 37, 2.1, None), g("holo4-27b", True, 33, 3.4, 41.2),
+                      g("ui-venus-2-9b", True, 31, 1.2, 88.0)],
+        "clicks": [{"model": "ui-venus-2-9b", "local": True, "created_at": iso(200), "hits": 18, "answered": 20,
+                    "malformed": 0, "errors": 0, "latency_p50_s": 1.1, "latency_p95_s": 1.9, "median_error_px": 9.0}],
+        "resources": [{"model": "holo4-27b", "mode": "solo", "created_at": iso(250), "vram_used_gib": 22.1,
+                       "vram_total_gib": 23.99, "model_vram_gib": 17.4, "budget_gib": 20.0, "fits": True,
+                       "server_rss_gib": 1.3, "ram_used_gib": 11.2, "game_rss_gib": 3.6}],
+        "ranking": [{"model": "claude-haiku-5-5", "hit_rate": 0.925, "latency_p50_s": 2.1, "local": False,
+                     "fits": {"coop": {"fits": None, "need_gib": None, "how": "api"},
+                              "solo": {"fits": None, "need_gib": None, "how": "api"}}},
+                    {"model": "holo4-27b", "hit_rate": 0.825, "latency_p50_s": 3.4, "local": True,
+                     "fits": fits(False, True, 17.4, "measured")},
+                    {"model": "ui-venus-2-9b", "hit_rate": 0.775, "latency_p50_s": 1.2, "local": True,
+                     "fits": fits(True, True, 11.3)}],
+        "recommended": {"coop": "ui-venus-2-9b", "solo": "holo4-27b"},
+        "markdown": "Grounding (`bench grounding`): 40 targets from 3 Claude runs.\n\n| Model | Hit rate |\n|---|---|\n"
+                    "| holo4-27b | 82% |\n\nRecommended: co-op **ui-venus-2-9b**, solo **holo4-27b**.\n",
+    }
+
+
 class Stub:
     """Mutable fake backend state shared by the handler threads."""
 
@@ -171,6 +214,20 @@ class Stub:
         self.downloading = None
         self.coop = False
         self.images: dict[str, bytes] = {}
+        self.targets = make_targets()
+        self.bench_polls = 0  # GET /api/bench calls left before the running job finishes
+        self.bench_job = None  # the running job's action
+        self.bench_last = {
+            "action": "grounding", "argv": ["/venv/bin/python", "-m", "sts_cua.bench", "grounding", "holo4-27b",
+                                            "--mode", "solo", "--serve"],
+            "pid": 707, "started_at": iso(30), "models": ["holo4-27b"], "mode": "solo", "serve": True,
+            "running": False, "exit_code": 0,
+            "output": [f"holo4-27b {i}/40 20261025T181542Z-{i:04d}: hit {i * 1.5:.1f} px 3.40 s" for i in range(1, 41)]
+                      + ["| holo4-27b | 82% (33/40) | 14.5 |", "wrote runs/bench/20261026T100000Z/results.json " + XSS],
+        }
+        self.llama_found = False
+        self.install_polls = 0
+        self.install_last = None
 
     def image(self, key: str) -> bytes:
         if key not in self.images:
@@ -216,6 +273,72 @@ class Stub:
                            "model": self.served if self.vllm else None, "mode": "solo" if self.vllm else None,
                            "served": [self.served] if self.vllm else None, "port": 8000, "ready": self.vllm},
                 "download": {"running": bool(self.downloading), "model": self.downloading}}
+
+    def bench(self) -> dict:
+        from sts_cua.models.registry import MODELS, budget
+
+        if self.bench_job and self.bench_polls > 0:
+            self.bench_polls -= 1
+            if self.bench_polls == 0:
+                self.finish_bench(0)
+        running = bool(self.bench_job)
+        have = {"holo4-27b", "ui-venus-2-9b"}
+        return {
+            "job": {"running": running, "pid": 808 if running else None, "since": iso(0.5) if running else None,
+                    "action": self.bench_job, "external": False},
+            "last": self.bench_last,
+            "targets": {"count": len(self.targets), "rejected": 2, "error": None, "sheets_stale": False,
+                        "items": self.targets,
+                        "sheets": [{"name": f"sheet-0{i}.png", "url": f"/api/bench/review/sheet-0{i}.png?v=1"} for i in (1, 2)]},
+            "models": {"local": [{"name": m.name, "server": m.server, "thinking": m.thinking, "rank": m.rank,
+                                  "need_gib": round(m.need_gib, 2), "downloaded": m.name in have,
+                                  "fits": {mode: m.fits(budget(mode)) for mode in ("coop", "solo", "max")}}
+                                 for m in sorted(MODELS.values(), key=lambda m: -m.rank)],
+                       "reference": ["claude-haiku-5-5", "claude-sonnet-5-5"]},
+            "modes": ["coop", "solo", "max"],
+            "baselines": {"pre-server": {"time": iso(400), "mode": "solo", "gpu_used_mib": 4700, "ram_used_mib": 9100}},
+            "server": {"running": self.vllm, "model": self.served if self.vllm else None, "mode": "solo" if self.vllm else None},
+            "clicks_display": ":98",
+        }
+
+    def start_bench(self, action: str, body: dict) -> dict:
+        self.bench_job = action.replace("-", "_")
+        self.bench_polls = 2
+        self.bench_last = {"action": self.bench_job, "argv": ["/venv/bin/python", "-m", "sts_cua.bench", action],
+                           "pid": 808, "started_at": NOW.isoformat(), "models": body.get("models") or [],
+                           "mode": body.get("mode"), "serve": bool(body.get("serve")), "running": True,
+                           "exit_code": None, "output": [f"--- sts_cua.app started: python -m sts_cua.bench {action}",
+                                                         "progress 1/2 " + XSS]}
+        return {"started": True, "pid": 808, "action": self.bench_job, "argv": self.bench_last["argv"]}
+
+    def finish_bench(self, code: int) -> None:
+        last = self.bench_last
+        last.update(running=False, exit_code=code)
+        last["output"] = last["output"] + ["done"]
+        if last["action"] == "write_docs" and code == 0:
+            last["changed"] = {"rows": ["ram_server"], "diff": [
+                "-- The vLLM process itself: **measure**",
+                "+- The vLLM process itself: 2.1 GiB RSS <!-- bench:ram_server --> " + XSS]}
+        if last["action"] == "delete":
+            self.targets = self.targets[1:]
+        self.bench_job = None
+
+    def llama(self) -> dict:
+        running = self.install_polls > 0
+        if running:
+            self.install_polls -= 1
+            if self.install_polls == 0:
+                self.install_last["exit_code"] = 1
+        tail = [] if not self.install_last else [
+            "[install_llama_cpp] nvcc not found. Install the CUDA toolkit for WSL-Ubuntu (cuda-toolkit-12-x only, no driver):",
+            "[install_llama_cpp]   https://developer.nvidia.com/cuda-downloads (Linux > x86_64 > WSL-Ubuntu)",
+            "[install_llama_cpp] or run this script with --prebuilt, which needs no toolkit. " + XSS]
+        last = self.install_last or {}
+        return {"found": self.llama_found, "path": "/home/raph/llama.cpp/build/bin/llama-server" if self.llama_found else None,
+                "version": "11900 (abc1234)" if self.llama_found else None, "release": None,
+                "install": {"running": running, "pid": 909 if running else None, "since": iso(1) if running else None,
+                            "prebuilt": last.get("prebuilt"), "exit_code": None if running else last.get("exit_code"),
+                            "started_at": last.get("started_at"), "tail": tail, "nvcc_missing": bool(tail)}}
 
     def live(self) -> dict:
         run_id = next(iter(self.runs))
@@ -293,6 +416,17 @@ def make_handler(stub: Stub, require_auth: bool = True):
                 return self.send_json(stub.status())
             if path == "/api/models":
                 return self.send_json(stub.models())
+            if path == "/api/llama":
+                return self.send_json(stub.llama())
+            if path == "/api/bench":
+                return self.send_json(stub.bench())
+            if path == "/api/bench/results":
+                return self.send_json(bench_results())
+            m = re.match(r"^/api/bench/review/([^/]+)$", path)
+            if m:
+                if not SAFE.match(m.group(1)) or not re.match(r"^sheet-\d+\.png$", m.group(1)):
+                    return self.send_json({"error": "no such sheet"}, 404)
+                return self.send_bytes(stub.image("contact " + m.group(1)), "image/png")
             if path == "/api/live":
                 return self.send_json(stub.live())
             if path == "/api/screen.png":
@@ -383,6 +517,26 @@ def make_handler(stub: Stub, require_auth: bool = True):
                     return self.send_json({"error": "already downloading"}, 409)
                 stub.downloading = body.get("model")
                 return self.send_json({"started": True, "pid": 606, "model": stub.downloading})
+            if path == "/api/llama/install":
+                if stub.install_polls > 0:
+                    return self.send_json({"error": "llama.cpp is already being installed"}, 409)
+                stub.install_polls = 2
+                stub.install_last = {"prebuilt": bool(body.get("prebuilt")), "started_at": NOW.isoformat(), "exit_code": None}
+                return self.send_json({"started": True, "pid": 909, "argv": ["bash", "tools/install_llama_cpp.sh"]})
+            if path == "/api/bench/stop":
+                was = bool(stub.bench_job)
+                if was:
+                    stub.finish_bench(-2)
+                return self.send_json({"stopped": True, "pids": [808] if was else []})
+            m = re.match(r"^/api/bench/([\w-]+)$", path)
+            if m:
+                if m.group(1) not in BENCH_ACTIONS:
+                    return self.send_json({"error": "no such action"}, 404)
+                if stub.bench_job:
+                    return self.send_json({"error": f"a bench job is already running ({stub.bench_job})"}, 409)
+                if m.group(1) == "grounding" and not body.get("models"):
+                    return self.send_json({"error": "models must be a non-empty list"}, 400)
+                return self.send_json(stub.start_bench(m.group(1), body))
             if path == "/api/runs/start":
                 if stub.running:
                     return self.send_json({"error": "a supervisor is already running"}, 409)

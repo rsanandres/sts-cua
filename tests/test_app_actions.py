@@ -224,3 +224,53 @@ def test_reflect(app_server):
     assert c.post("/api/memory/reflect", {"run_id": OLD_RUN})[0] == 409
     assert c.post("/api/memory/notes/n0001/retire")[0] == 409  # the store is being edited
     assert c.get("/api/status")[1]["busy"] == "reflect"
+
+
+def test_local_model_options():
+    """--local-thinking / --local-effort for registry models; Claude's --thinking/--effort only for Claude."""
+    from sts_cua.app.routes import coop_argv
+
+    base = [PY, "-m", "sts_cua.supervisor", "--display", ":99", "--model", "holo4-27b", "--daily-budget", "2"]
+    assert argv({"model": "holo4-27b", "thinking": "on", "effort": "high"}) == base
+    assert argv({"model": "holo4-27b", "local_thinking": "on", "local_effort": "xhigh"}) == \
+        base + ["--local-thinking", "on", "--local-effort", "xhigh"]
+    assert argv({"model": "holo4-27b", "local_thinking": "off"}) == base + ["--local-thinking", "off"]
+    assert argv({"model": "holo4-27b", "local_effort": "low"}) == base + ["--local-effort", "low"]  # thinking on by default
+    assert argv({"model": "qwen3-vl-8b", "local_thinking": "off", "local_effort": None})[-2:] == ["--local-thinking", "off"]
+    settings = supervisor_argv({"model": "holo4-27b", "local_thinking": "on", "local_effort": "medium"}, PY, ":99")[1]
+    assert (settings["local_thinking"], settings["local_effort"]) == ("on", "medium")
+    coop = coop_argv({"model": "ui-venus-2-9b", "local_thinking": "on", "local_effort": "medium"}, PY, ":99")[0]
+    assert coop[-4:] == ["--local-thinking", "on", "--local-effort", "medium"] and "--thinking" not in coop
+
+    for bad in ({"model": "holo4-27b", "local_thinking": "maybe"}, {"model": "holo4-27b", "local_effort": "max"},
+                {"model": "holo4-27b", "local_thinking": True},
+                {"model": "holo4-27b", "local_thinking": "off", "local_effort": "low"},  # effort needs thinking
+                {"model": "qwen3-vl-8b", "local_thinking": "on"}, {"model": "qwen3-vl-8b", "local_effort": "low"},
+                {"model": "claude-haiku-5-5", "local_thinking": "on"}, {"model": "scripted", "local_effort": "low"}):
+        with pytest.raises(ApiError) as e:
+            argv(bad)
+        assert e.value.status == 400, bad
+    with pytest.raises(ApiError) as e:  # co-op leaves thinking off unless asked
+        coop_argv({"model": "holo4-27b", "local_effort": "low"}, PY, ":99")
+    assert "co-op defaults to off" in e.value.message
+
+
+def test_local_options_parse_with_the_real_clis():
+    import argparse
+    from unittest import mock
+
+    from sts_cua.__main__ import parse_args
+    from sts_cua.app.routes import coop_argv
+
+    args = parse_args(coop_argv({"model": "holo4-27b", "local_thinking": "on", "local_effort": "low"}, PY, ":99")[0][3:])
+    assert (args.model, args.local_thinking, args.local_effort, args.coop) == ("holo4-27b", "on", "low", True)
+    seen = {}
+    original = argparse.ArgumentParser.parse_args
+
+    def stop(self, a=None, namespace=None):
+        seen["args"] = original(self, a, namespace)
+        raise SystemExit(0)
+
+    with mock.patch.object(argparse.ArgumentParser, "parse_args", stop), pytest.raises(SystemExit):
+        supervisor_main(argv({"model": "qwen3.8-27b", "local_thinking": "off"})[3:])
+    assert (seen["args"].model, seen["args"].local_thinking, seen["args"].local_effort) == ("qwen3.8-27b", "off", None)

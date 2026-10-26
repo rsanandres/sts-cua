@@ -172,7 +172,7 @@ def start_server(tmp_path: Path, capture=None) -> Running:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     llama = bin_dir / "llama-server"
-    llama.write_text("#!/bin/sh\nsleep 60\n")
+    llama.write_text('#!/bin/sh\n[ "$1" = --version ] && { echo "version: 9999 (fake)"; exit 0; }\nsleep 60\n')
     llama.chmod(0o755)
     config = AppConfig(
         repo=repo, state_dir=state_dir, token_file=state_dir / "app-token", port=0,
