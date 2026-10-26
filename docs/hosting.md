@@ -166,3 +166,9 @@ Spillover:
 3. Play one co-op turn. Shared GPU memory on Task Manager > Performance > GPU should stay flat.
 4. RAM inside WSL: `free -h`, then `ps -eo pid,rss,comm --sort=-rss | head`. Compare with the VmmemWSL row in Task Manager.
 5. Replace the **measure** rows above with the results.
+
+## Measured on the PC
+
+<!-- bench:start -->
+Nothing measured yet. `python -m sts_cua.bench report --write-docs` fills this in from the bake-off (README, "Bake-off").
+<!-- bench:end -->

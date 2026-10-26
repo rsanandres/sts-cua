@@ -9,3 +9,5 @@ game-config-backup/
 !src/sts_cua/app/static/**/*.png
 target.json
 /memory/
+/bench/*
+!/bench/README.md
