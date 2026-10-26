@@ -297,7 +297,7 @@ Which local model clicks best and fits next to the games: `python -m sts_cua.ben
 .venv/bin/python -m sts_cua.bench baseline --label desktop     # before any game (co-op: gives the games' VRAM)
 tools/launch_sts2.sh /tmp/sts2.log                             # co-op: Raph's Windows copy too
 .venv/bin/python -m sts_cua.bench baseline                     # games up, model server not started yet
-.venv/bin/python -m sts_cua.serve start qwen3.8-27b            # or vllm serve / llama-server by hand
+.venv/bin/python -m sts_cua.serve start qwen3.8-27b --mode solo   # or vllm serve / llama-server by hand
 .venv/bin/python -m sts_cua.bench resources qwen3.8-27b --mode solo --game
 .venv/bin/python -m sts_cua.bench resources qwen3-vl-8b --mode coop --game --server-log ~/.sts-cua/logs/vllm.log
 
@@ -311,7 +311,7 @@ tools/launch_sts2.sh /tmp/sts2.log                             # co-op: Raph's W
 ```
 
 - **Targets** (`bench/targets.jsonl`, images in `bench/images/`, both in `.gitignore`): steps of Claude runs with exactly one left click (no key first, no co-op rule), whose next screenshot changed (`screen_diff` of at least 1.0). The instruction comes from the step's thought ("Click the End Turn button", "Play card 2 on the Nibbit"), with coordinates removed. Where the mod's state can tell, the click did what it says: ending a turn or playing a card changed the hand, energy or enemies, a map click left the map. A hit is a click within 40 px of Claude's click (at 1280x720). Deleted ids go to `bench/rejected.txt` and never come back.
-- **Grounding** builds each model with the factory, the prompt `prompts/grounding.txt`, the goal "Return only the click for: <instruction>", no history, temperature 0 for local models. Per target: hit, error in px, latency, tokens/s from llama-server's `timings`, and malformed replies (no click). Errors (server down) are counted apart; 3 in a row skip the rest of that model. `--serve` starts each local model with `python -m sts_cua.serve start <model>` first.
+- **Grounding** builds each model with the factory, the prompt `prompts/grounding.txt`, the goal "Return only the click for: <instruction>", no history, temperature 0 for local models. Per target: hit, error in px, latency, tokens/s from llama-server's `timings`, and malformed replies (no click). Errors (server down) are counted apart; 3 in a row skip the rest of that model. `--serve` stops any running model server and starts each local model with `python -m sts_cua.serve start <model> --mode <mode>` first (`--mode`, default solo).
 - **Clicks** run `tools/click_target.py` on their own display (no game) and score N live clicks from `target.json`.
 - **Resources:** `nvidia-smi` used and total (the whole GPU, Windows included), the model's VRAM as used minus the pre-server baseline, WSL RAM from `/proc/meminfo`, the model server's RSS with its children, and with `--game` the game, Steam and Xvfb RSS.
 - **Results:** `runs/bench/<timestamp>/results.json` and `results.md`. `report` takes the newest result per model (per model and mode for memory) and ranks by hit rate, then median latency. The recommendation is the best-ranked local model whose VRAM fits the mode's budget in `models/registry.py` (measured, else the registry's estimate, marked "est.").
