@@ -28,7 +28,7 @@ TOKEN = "test-token"
 COOKIE = "sts_cua_token"
 SAFE = re.compile(r"^[\w.-]+$")
 XSS = '<script>window.__xss = 1</script><img src=x onerror="window.__xss = 2">'
-LOGS = ("steam", "game", "vllm", "supervisor", "app", "coop")
+LOGS = ("steam", "game", "model", "download", "vllm", "supervisor", "app", "coop")
 CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8"}
 
 NOW = datetime(2026, 10, 25, 18, 0, tzinfo=timezone.utc)
@@ -166,7 +166,9 @@ class Stub:
         self.running = True
         self.live_step = 5
         self.busy_polls = 0
-        self.vllm = True
+        self.vllm = True  # the model server
+        self.served = "holo4-27b"
+        self.downloading = None
         self.coop = False
         self.images: dict[str, bytes] = {}
 
@@ -184,7 +186,7 @@ class Stub:
             busy = "stack_up"
         return {
             "processes": {"steam": proc(True, 300, 101), "xvfb": proc(True, 301, 99), "game": proc(True, 290, 202),
-                          "vllm": proc(self.vllm, 120, 303), "supervisor": proc(self.running, 45, 404)},
+                          "model": proc(self.vllm, 120, 303), "supervisor": proc(self.running, 45, 404)},
             "gpu": {"used_mib": 17600, "total_mib": 24564},
             "ram": {"used_mib": 21000, "total_mib": 32000},
             "budget": {"date": "2026-10-25", "spent_usd": 0.42, "cap_usd": 2.0},
@@ -192,6 +194,28 @@ class Stub:
             "busy": busy,
             "coop": proc(self.coop, 5, 505),
         }
+
+    def models(self) -> dict:
+        from sts_cua.models.registry import MODELS, budget
+
+        have = {"holo4-27b", "ui-venus-2-9b"}
+        rows = []
+        for m in sorted(MODELS.values(), key=lambda m: -m.rank):
+            total = int(m.file_gib * 2**30)
+            got = total if m.name in have else (total // 3 if m.name == self.downloading else 0)
+            rows.append({"name": m.name, "family": m.family, "server": m.server, "repo": m.repo, "rank": m.rank,
+                         "file_gib": round(m.file_gib, 2), "need_gib": round(m.need_gib, 2),
+                         "fits": {mode: m.fits(budget(mode)) for mode in ("coop", "solo")},
+                         "downloaded": m.name in have,
+                         "download": {"bytes": got, "total": total, "running": m.name == self.downloading},
+                         "license": m.license, "thinking": m.thinking, "notes": m.notes + " <b>x</b>",
+                         "running": self.vllm and m.name == self.served})
+        return {"models": rows, "best": {"coop": "ui-venus-2-9b", "solo": "holo4-27b"},
+                "gpu": {"used_mib": 17600, "free_mib": 6964, "total_mib": 24564},
+                "server": {"running": self.vllm, "pid": 303 if self.vllm else None,
+                           "model": self.served if self.vllm else None, "mode": "solo" if self.vllm else None,
+                           "served": [self.served] if self.vllm else None, "port": 8000, "ready": self.vllm},
+                "download": {"running": bool(self.downloading), "model": self.downloading}}
 
     def live(self) -> dict:
         run_id = next(iter(self.runs))
@@ -267,6 +291,8 @@ def make_handler(stub: Stub, require_auth: bool = True):
         def route_get(self, path, q):
             if path == "/api/status":
                 return self.send_json(stub.status())
+            if path == "/api/models":
+                return self.send_json(stub.models())
             if path == "/api/live":
                 return self.send_json(stub.live())
             if path == "/api/screen.png":
@@ -342,12 +368,21 @@ def make_handler(stub: Stub, require_auth: bool = True):
                 if body.get("confirm") is not True:
                     return self.send_json({"error": "confirm required"}, 400)
                 return self.send_json({"shutting_down": True})
-            if path == "/api/vllm/start":
+            if path == "/api/model/start":
+                if stub.vllm:
+                    return self.send_json({"error": "a model server is already running; stop it first"}, 409)
                 stub.vllm = True
-                return self.send_json({"started": True})
-            if path == "/api/vllm/stop":
+                stub.served = "holo4-27b" if body.get("model") == "best" else body.get("model")
+                return self.send_json({"started": True, "pid": 303, "model": stub.served, "mode": body.get("mode"),
+                                       "reason": "stub"})
+            if path == "/api/model/stop":
                 stub.vllm = False
-                return self.send_json({"stopped": True})
+                return self.send_json({"stopped": True, "pids": [303]})
+            if path == "/api/model/download":
+                if stub.downloading:
+                    return self.send_json({"error": "already downloading"}, 409)
+                stub.downloading = body.get("model")
+                return self.send_json({"started": True, "pid": 606, "model": stub.downloading})
             if path == "/api/runs/start":
                 if stub.running:
                     return self.send_json({"error": "a supervisor is already running"}, 409)
