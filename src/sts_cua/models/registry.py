@@ -40,6 +40,7 @@ class LocalModel:
     thinking: bool = False  # supports a thinking mode the adapter can switch on
     notes: str = ""
     extra_args: tuple[str, ...] = field(default=())
+    rank: int = 0  # higher is stronger, from published scores until the bake-off measures it
 
     @property
     def file_gib(self) -> float:
@@ -58,38 +59,52 @@ MODELS: dict[str, LocalModel] = {m.name: m for m in (
         name="qwen3-vl-8b", family="qwen3-vl", server="vllm",
         repo="Qwen/Qwen3-VL-8B-Instruct-FP8", served_name="Qwen/Qwen3-VL-8B-Instruct-FP8",
         weights=(File("model.safetensors", 10_590_299_512),), license="apache-2.0",
-        notes="First pick; too weak for Spire strategy. Kept as the baseline.",
+        notes="First pick; too weak for Spire strategy. Kept as the baseline.", rank=10,
     ),
     LocalModel(
         name="qwen3.8-27b", family="qwen3.8", server="llama",
         repo="unsloth/Qwen3.8-27B-GGUF", served_name="qwen3.8-27b",
         weights=(File("Qwen3.8-27B-UD-Q4_K_XL.gguf", 17_559_178_144),),
         mmproj=File("mmproj-F16.gguf", 927_607_488), license="apache-2.0", thinking=True,
-        notes="Solo pick. OSWorld-Verified 84.3 (model card). Thinking on by default upstream.",
+        notes="Solo pick. OSWorld-Verified 84.3 (model card). Thinking on by default upstream.", rank=80,
     ),
     LocalModel(
         name="qwen3.8-27b-iq3", family="qwen3.8", server="llama",
         repo="unsloth/Qwen3.8-27B-GGUF", served_name="qwen3.8-27b-iq3",
         weights=(File("Qwen3.8-27B-UD-IQ3_XXS.gguf", 10_934_860_704),),
         mmproj=File("mmproj-F16.gguf", 927_607_488), license="apache-2.0", thinking=True,
-        notes="Co-op stretch: fits 13 GiB with little headroom; 3-bit clicking untested.",
+        notes="Co-op stretch: fits 13 GiB with little headroom; 3-bit clicking untested.", rank=50,
+    ),
+    LocalModel(
+        name="qwen3.8-27b-q5", family="qwen3.8", server="llama",
+        repo="unsloth/Qwen3.8-27B-GGUF", served_name="qwen3.8-27b-q5",
+        weights=(File("Qwen3.8-27B-UD-Q5_K_S.gguf", 18_665_753_504),),
+        mmproj=File("mmproj-F16.gguf", 927_607_488), license="apache-2.0", thinking=True, rank=85,
+        notes="Max solo: 5-bit, about 19.7 GiB with overhead. Only when measured free VRAM allows.",
     ),
     LocalModel(
         name="holo4-27b", family="holo4", server="llama",
         repo="Hcompany/Holo4-27B-GGUF", served_name="holo4-27b",
         weights=(File("q4_k_m.gguf", 16_875_182_592),),
         mmproj=File("mmproj.f16.gguf", 927_606_816), license="cc-by-nc-4.0", thinking=True,
-        notes="Solo A/B against qwen3.8-27b. Fine-tune of Qwen3.8-27B; OSWorld 2.0 61.7.",
+        notes="Solo A/B against qwen3.8-27b. Fine-tune of Qwen3.8-27B; OSWorld 2.0 61.7.", rank=90,
     ),
     LocalModel(
         name="ui-venus-2-9b", family="ui-venus-2", server="llama",
         repo="bartowski/UI-Venus-2-9B-GGUF", served_name="ui-venus-2-9b",
         weights=(File("UI-Venus-2-9B-Q8_0.gguf", 9_545_982_752),),
         mmproj=File("mmproj-UI-Venus-2-9B-f16.gguf", 918_165_664), license="pending", thinking=True,
-        notes="Co-op pick. OSWorld-Verified 70.8 (model card). Upstream license pending.",
+        notes="Co-op pick. OSWorld-Verified 70.8 (model card). Upstream license pending.", rank=60,
     ),
 )}
 
 
 def budget(mode: str) -> float:
     return COOP_BUDGET_GIB if mode == "coop" else SOLO_BUDGET_GIB
+
+
+def best(free_gib: float, downloaded: set[str] | None = None) -> LocalModel | None:
+    """The highest-ranked model whose need fits in free_gib (only downloaded ones, if given)."""
+    fitting = [m for m in MODELS.values()
+               if m.need_gib <= free_gib and (downloaded is None or m.name in downloaded)]
+    return max(fitting, key=lambda m: m.rank, default=None)
