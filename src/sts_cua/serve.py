@@ -16,8 +16,8 @@ control app uses, so either can stop what the other started.
 Files: llama.cpp models download into <models dir>/<repo>/ (the registry's weights and
 mmproj, nothing else); the vLLM baseline goes into the Hugging Face cache, where
 `vllm serve <repo>` looks for it (and fetches it itself on first start if missing).
-The models dir is --models-dir, else $STS_CUA_MODELS, else ~/models, or /mnt/d/models
-when only that exists (a Windows drive with room for several 27B models). Weights on a
+The models dir is --models-dir, else $STS_CUA_MODELS, else whichever of ~/models and
+/mnt/d/models (a Windows drive with room for several 27B models) has model folders in it. Weights on a
 Windows drive (/mnt/...) load through WSL's drvfs, which is slower than the Linux
 filesystem, so llama-server reads them without mmap there. Each load time goes to
 logs/model.log and logs/model_loads.jsonl, for comparing the two.
@@ -64,13 +64,27 @@ class ServeError(Exception):
 # ---- where the files live
 
 def models_root(root: Path | str | None = None, windows: Path = WINDOWS_MODELS) -> Path:
-    """--models-dir, else $STS_CUA_MODELS, else ~/models, else /mnt/d/models if only it exists."""
+    """--models-dir, else $STS_CUA_MODELS, else whichever of ~/models and /mnt/d/models holds a
+    registry model's folder (~/models first), else /mnt/d/models if only it exists, else ~/models.
+    The app is started by a Windows shortcut through `bash -lc`, which doesn't read ~/.bashrc, so an
+    export there is easy to miss; an empty ~/models must not hide models downloaded to D:."""
     if root:
         return Path(root).expanduser()
     if os.environ.get(MODELS_ENV):
         return Path(os.environ[MODELS_ENV]).expanduser()
     home = Path.home() / "models"
+    for d in (home, windows):
+        if has_models(d):
+            return d
     return windows if not home.exists() and windows.is_dir() else home
+
+
+def has_models(d: Path) -> bool:
+    """d has a <repo>/ folder for a llama.cpp model in the registry (complete or not)."""
+    try:
+        return any((d / m.repo).is_dir() for m in MODELS.values() if m.server == "llama")
+    except OSError:
+        return False
 
 
 def on_drvfs(path: Path) -> bool:
