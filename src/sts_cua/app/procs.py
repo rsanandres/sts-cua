@@ -28,7 +28,12 @@ RUN_PATTERN = r"python[0-9.]* -m sts_cua(\.supervisor|\.eval run)?( |$)"
 SUPERVISOR_PATTERN = r"python[0-9.]* -m sts_cua\.(supervisor|eval run)( |$)"
 # A co-op session: the harness with --coop (python -m sts_cua ... --coop).
 COOP_PATTERN = r"python[0-9.]* -m sts_cua .*--coop( |$)"
-VLLM_PATTERN = "vllm serve|vllm.entrypoints|llama-server"
+# A local model server: vLLM, or llama.cpp's llama-server as the program itself (argv[0]),
+# so `python -m sts_cua.serve start x --llama-server ...` isn't mistaken for one.
+# tools/stack_down.sh uses the same pattern.
+# The [ ] and [.] keep a pgrep running this pattern from matching its own command line.
+MODEL_PATTERN = r"vllm[ ]serve|vllm[.]entrypoints|^[^ ]*llama-server( |$)"
+VLLM_PATTERN = MODEL_PATTERN  # the old name
 
 
 def watches(display: str = ":99") -> dict[str, list[str]]:
@@ -37,7 +42,7 @@ def watches(display: str = ":99") -> dict[str, list[str]]:
         "steam": ["-x", "steam"],
         "xvfb": ["-f", f"Xvfb {display}( |$)"],
         "game": ["-x", "SlayTheSpire2"],
-        "vllm": ["-f", VLLM_PATTERN],
+        "model": ["-f", MODEL_PATTERN],
         "supervisor": ["-f", SUPERVISOR_PATTERN],
         "coop": ["-f", COOP_PATTERN],
     }
@@ -154,6 +159,13 @@ class ProcessManager:
                 path.unlink(missing_ok=True)
                 return None
             return record
+
+    def update(self, name: str, **fields) -> None:
+        """Add fields to a running child's pid file record."""
+        with self._lock:
+            record = self.managed(name)
+            if record:
+                self._pid_file(name).write_text(json.dumps({**record, **fields}) + "\n", encoding="utf-8")
 
     def pids(self, name: str) -> list[int]:
         """Running pids for a watched process: the app's own child first, then pgrep matches."""

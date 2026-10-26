@@ -26,8 +26,9 @@ from pathlib import Path
 from typing import Callable
 from zoneinfo import ZoneInfo
 
-from .. import coop
+from .. import coop, serve
 from ..models.factory import LOCAL_MODELS
+from ..models.registry import MODELS, budget
 from ..state import DEFAULT_URL, fetch_state, summarize
 from ..score import run_mode
 from ..supervisor import BUDGET_TZ, spent_today
@@ -44,10 +45,7 @@ DEFAULT_COOP_COST = 1.0
 COOP_IDLE_MINUTES = (5.0, 120.0)
 MEMORY_STORE = "memory/notes.jsonl"
 NOTE_STATUSES = ("all", "probation", "active", "retired")
-# The docs/hosting.md vLLM command, minus the model.
-VLLM_FLAGS = ["--gpu-memory-utilization", "0.55", "--max-model-len", "8192", "--max-num-seqs", "1",
-              "--limit-mm-per-prompt", '{"image":1,"video":0}']
-VLLM_READY = "Application startup complete"  # uvicorn's line once vLLM's server is up
+MODEL_CHOICES = (serve.BEST, *MODELS)  # POST /api/model/start: the registry, or the best that fits
 STACK_READY = "stack is up"  # tools/stack_up.sh
 NVIDIA_SMI = ("/usr/lib/wsl/lib/nvidia-smi", "nvidia-smi")
 REFLECT_PATTERN = r"python[0-9.]* -m sts_cua\.memory reflect"
@@ -71,6 +69,9 @@ class AppConfig:
     state_url: str = DEFAULT_URL
     python: str | None = None  # None: <repo>/.venv/bin/python if present, else this interpreter
     vllm: str | None = None  # None: <repo>/.venv/bin/vllm if present, else vllm on PATH
+    llama_server: str | None = None  # None: $LLAMA_SERVER, ~/llama.cpp/build/bin/llama-server, PATH
+    models_dir: Path | None = None  # None: serve.models_root ($STS_CUA_MODELS, ~/models or /mnt/d/models)
+    model_port: int = serve.PORT
     nvidia_smi: tuple[str, ...] = NVIDIA_SMI
     shutdown_delay: float = 1.5  # seconds between replying and running wsl --shutdown
 
@@ -251,6 +252,9 @@ class App:
     capture: Callable[[str], bytes] = capture_png
     clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
     costs: files.CostTracker = field(default_factory=files.CostTracker)
+    vram: Callable[[], dict | None] | None = None  # None: serve.gpu(config.nvidia_smi)
+    probe: Callable[[str, int], bool] = serve.ready  # the model server answers its readiness URL
+    served: Callable[[int], list[str] | None] = serve.served  # ids /v1/models lists
     shutting_down: bool = False
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _screen_lock: threading.Lock = field(default_factory=threading.Lock)
@@ -284,11 +288,12 @@ class App:
             return "stack_down"
         if p.managed("stack_up") and STACK_READY not in p.log_since_start("stack_up"):
             return "stack_up"
-        for name in ("supervisor", "vllm", "coop"):
+        for name in ("supervisor", serve.NAME, "coop"):
             if name in p.stopping:
                 return f"{name}_stop"
-        if p.managed("vllm") and VLLM_READY not in p.log_since_start("vllm", limit=4 << 20):
-            return "vllm_start"
+        model = p.managed(serve.NAME)
+        if model and "ready_s" not in model and not self.probe(model.get("server", "llama"), model.get("port", self.config.model_port)):
+            return "model_start"
         if p.managed("reflect"):
             return "reflect"
         return None
@@ -314,7 +319,7 @@ class App:
 
     def status(self, **_) -> dict:
         return {
-            "processes": {name: self.procs.info(name) for name in ("steam", "xvfb", "game", "vllm", "supervisor")},
+            "processes": {name: self.procs.info(name) for name in ("steam", "xvfb", "game", serve.NAME, "supervisor")},
             "gpu": gpu_memory(self.config.nvidia_smi),
             "ram": ram(),
             "budget": self._budget(),
@@ -358,28 +363,102 @@ class App:
         threading.Thread(target=later, daemon=True, name="wsl-shutdown").start()
         return {"shutting_down": True}
 
-    def vllm_start(self, body: dict, **_) -> dict:
-        model = _choice(body, "model", tuple(LOCAL_MODELS))
-        if self.procs.info("vllm")["running"]:
-            raise ApiError(409, "a model server is already running")
-        exe = self.config.vllm
-        if not exe:
-            venv = self.config.repo / ".venv" / "bin" / "vllm"
-            exe = str(venv) if venv.exists() else shutil.which("vllm")
-        if not exe:
-            raise ApiError(500, "vllm not found: install it on PATH or start the app with --vllm")
-        pid = self.procs.start("vllm", [exe, "serve", LOCAL_MODELS[model], *VLLM_FLAGS], cwd=self.config.repo)
-        return {"started": True, "pid": pid}
+    # model server (serve.py; one at a time on config.model_port)
 
-    def vllm_stop(self, **_) -> dict:
-        return {"stopped": True, "pids": self.procs.stop("vllm")}
+    def _gpu_reading(self) -> dict | None:
+        return self.vram() if self.vram else serve.gpu(self.config.nvidia_smi)
+
+    def _models_root(self) -> Path:
+        return serve.models_root(self.config.models_dir)
+
+    def model_start(self, body: dict, **_) -> dict:
+        name = _choice(body, "model", MODEL_CHOICES)
+        mode = _choice(body, "mode", serve.MODES)
+        force = body.get("force", False)
+        if not isinstance(force, bool):
+            raise ApiError(400, "force must be true or false")
+        with self._lock:
+            if self.procs.info(serve.NAME)["running"]:
+                raise ApiError(409, "a model server is already running; stop it first")
+            root = self._models_root()
+            try:
+                m, reason = serve.choose(name, mode, serve.free_gib(self._gpu_reading()),
+                                         serve.downloaded_names(root), force)
+            except serve.ServeError as e:
+                raise ApiError(409, str(e)) from None
+            if m.server == "llama":
+                exe = serve.find_llama_server(self.config.llama_server)
+                if not exe:
+                    raise ApiError(500, "llama-server not found: run tools/install_llama_cpp.sh or start the app "
+                                        "with --llama-server")
+            else:
+                exe = serve.find_vllm(self.config.vllm, self.config.repo)
+                if not exe:
+                    raise ApiError(500, "vllm not found: install it on PATH or start the app with --vllm")
+            pid = serve.launch(self.procs, m, mode, exe, root, self.config.model_port, reason)
+        # Record the load time (logs/model_loads.jsonl) when it answers, even if no page is polling.
+        threading.Thread(target=serve.watch_load, args=(self.procs, m.server, self.config.model_port),
+                         kwargs={"probe": self.probe}, daemon=True, name="model-load").start()
+        return {"started": True, "pid": pid, "model": m.name, "mode": mode, "reason": reason}
+
+    def model_stop(self, **_) -> dict:
+        return {"stopped": True, "pids": self.procs.stop(serve.NAME)}
+
+    def vllm_start(self, body: dict, **_) -> dict:
+        """The old endpoint: {"model"} only, mode solo."""
+        return self.model_start({**body, "mode": body.get("mode", "solo")})
+
+    def model_download(self, body: dict, **_) -> dict:
+        name = _choice(body, "model", tuple(MODELS))
+        with self._lock:
+            running = self.procs.managed("download")
+            if running:
+                raise ApiError(409, f"already downloading {running.get('model')}")
+            argv = [self.python, "-m", "sts_cua.serve", "--models-dir", str(self._models_root()), "download", name]
+            pid = self.procs.start("download", argv, cwd=self.config.repo, env={"PYTHONUNBUFFERED": "1"},
+                                   extra={"model": name})
+        return {"started": True, "pid": pid, "model": name}
+
+    def models(self, **_) -> dict:
+        root = self._models_root()
+        reading = self._gpu_reading()
+        free = serve.free_gib(reading)
+        record = self.procs.managed(serve.NAME) or {}
+        running = self.procs.info(serve.NAME)
+        ids = self.served(self.config.model_port) if running["running"] else None
+        current = record.get("model") or serve.registry_name(ids)
+        dl = self.procs.managed("download") or {}
+        have = serve.downloaded_names(root)
+        rows = []
+        for m in sorted(MODELS.values(), key=lambda m: -m.rank):
+            rows.append({
+                "name": m.name, "family": m.family, "server": m.server, "repo": m.repo, "rank": m.rank,
+                "file_gib": round(m.file_gib, 2), "need_gib": round(m.need_gib, 2),
+                "fits": {mode: m.fits(budget(mode)) for mode in serve.MODES},
+                "downloaded": m.name in have,
+                "download": {**serve.progress(m, root), "running": dl.get("model") == m.name},
+                "license": m.license, "thinking": m.thinking, "notes": m.notes,
+                "running": running["running"] and current == m.name,
+            })
+        best = {}
+        for mode in serve.MODES:
+            limit = budget(mode) if free is None else min(free, budget(mode))
+            pick = serve.best(limit, have)
+            best[mode] = pick.name if pick else None
+        return {
+            "models": rows, "best": best, "gpu": reading,
+            "server": {"running": running["running"], "pid": running["pid"], "model": current,
+                       "mode": record.get("mode"), "served": ids, "port": record.get("port", self.config.model_port),
+                       "ready": bool(running["running"] and ids)},
+            "download": {"running": bool(dl), "model": dl.get("model")},
+        }
 
     def logs(self, name: str, query: dict, **_) -> dict:
         paths = {
             "steam": Path("/tmp/steam.log"),  # tools/stack_up.sh
             "game": Path("/tmp/sts2.log"),  # game.GameConfig.log_path
         }
-        if name not in ("steam", "game", "vllm", "supervisor", "app", "stack", "reflect", "coop"):
+        if name not in ("steam", "game", "model", "download", "vllm", "supervisor", "app", "stack", "reflect", "coop"):
             raise ApiError(404, f"no log {name}")
         path = paths.get(name) or self.procs.log_path(name)
         lines = _query_int(query, "lines", 200, 1, 2000)
@@ -599,8 +678,12 @@ ROUTES = [
     ("POST", r"/api/stack/up", "stack_up"),
     ("POST", r"/api/stack/down", "stack_down"),
     ("POST", r"/api/wsl/shutdown", "wsl_shutdown"),
-    ("POST", r"/api/vllm/start", "vllm_start"),
-    ("POST", r"/api/vllm/stop", "vllm_stop"),
+    ("GET", r"/api/models", "models"),
+    ("POST", r"/api/model/start", "model_start"),
+    ("POST", r"/api/model/stop", "model_stop"),
+    ("POST", r"/api/model/download", "model_download"),
+    ("POST", r"/api/vllm/start", "vllm_start"),  # aliases of /api/model/start (mode solo) and /api/model/stop
+    ("POST", r"/api/vllm/stop", "model_stop"),
     ("GET", r"/api/logs/" + _SEG.format("name"), "logs"),
     ("POST", r"/api/runs/start", "runs_start"),
     ("POST", r"/api/runs/stop", "runs_stop"),

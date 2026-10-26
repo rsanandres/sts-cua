@@ -54,19 +54,34 @@
         <button type="button" id="stack-up" class="primary">Stack up</button>
         <button type="button" id="stack-down">Stack down</button>
       </div>
-      <div class="buttons">
-        <label class="inline">Model
-          <select id="vllm-model">
-            <option value="qwen3-vl-8b">qwen3-vl-8b</option>
+    </div>
+    <div class="card" id="model-card">
+      <h2>Model server</h2>
+      <p id="model-served" class="muted">No model server running.</p>
+      <div class="row">
+        <label>Model
+          <select id="model-name">
+            <option value="best">Best that fits</option>
           </select>
         </label>
-        <button type="button" id="vllm-start">Start vLLM</button>
-        <button type="button" id="vllm-stop">Stop vLLM</button>
+        <label>Mode
+          <select id="model-mode">
+            <option value="coop">co-op (13 GiB)</option>
+            <option value="solo">solo (20 GiB)</option>
+          </select>
+        </label>
+      </div>
+      <p id="model-info" class="muted small"></p>
+      <div id="model-progress" class="meter" hidden></div>
+      <div class="buttons">
+        <button type="button" id="model-start" class="primary">Start</button>
+        <button type="button" id="model-stop">Stop</button>
+        <button type="button" id="model-download">Download</button>
       </div>
     </div>
     <div class="card danger-zone">
       <h2>Shut down WSL</h2>
-      <p class="muted">Stops everything in WSL (runs, vLLM, the game, Steam and this app) and frees the GPU memory and RAM for gaming on Windows.</p>
+      <p class="muted">Stops everything in WSL (runs, the model server, the game, Steam and this app) and frees the GPU memory and RAM for gaming on Windows.</p>
       <button type="button" id="wsl-shutdown" class="danger">Shut down WSL</button>
     </div>
   </section>
@@ -320,7 +335,8 @@
     <select id="log-name" aria-label="Log">
       <option value="supervisor">supervisor</option>
       <option value="coop">coop</option>
-      <option value="vllm">vllm</option>
+      <option value="model">model</option>
+      <option value="download">download</option>
       <option value="game">game</option>
       <option value="steam">steam</option>
       <option value="app">app</option>

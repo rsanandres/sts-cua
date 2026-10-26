@@ -179,22 +179,23 @@ def test_stack_up_and_down(app_server):
 
 
 def test_vllm_start_stop(app_server):
+    """The old /api/vllm/* endpoints are aliases of /api/model/* (mode solo)."""
     c, launcher = app_server.client, app_server.launcher
     assert c.post("/api/vllm/start", {"model": "claude-haiku-5-5"})[0] == 400
     assert c.post("/api/vllm/start", {})[0] == 400
     status, body = c.post("/api/vllm/start", {"model": "qwen3-vl-8b"})
-    assert status == 200 and body["started"] is True
+    assert status == 200 and body["started"] is True and body["mode"] == "solo"
     assert launcher.argv() == ["/opt/vllm/bin/vllm", "serve", "Qwen/Qwen3-VL-8B-Instruct-FP8",
                                "--gpu-memory-utilization", "0.55", "--max-model-len", "8192", "--max-num-seqs", "1",
-                               "--limit-mm-per-prompt", '{"image":1,"video":0}']
-    assert c.get("/api/status")[1]["busy"] == "vllm_start"
+                               "--limit-mm-per-prompt", '{"image":1,"video":0}', "--host", "127.0.0.1",
+                               "--port", "8000"]
+    assert c.get("/api/status")[1]["busy"] == "model_start"
     assert c.post("/api/vllm/start", {"model": "qwen3-vl-8b"})[0] == 409
-    with (app_server.state_dir / "logs" / "vllm.log").open("a") as f:
-        f.write("INFO:     Application startup complete.\n")
+    app_server.ready.append(True)  # the server answers /v1/models
     assert c.get("/api/status")[1]["busy"] is None
     assert c.post("/api/vllm/stop")[1]["stopped"] is True
     launcher.procs[0].wait(timeout=5)
-    assert not c.get("/api/status")[1]["processes"]["vllm"]["running"]
+    assert not c.get("/api/status")[1]["processes"]["model"]["running"]
 
 
 def test_wsl_shutdown_needs_confirm_and_replies_first(app_server):

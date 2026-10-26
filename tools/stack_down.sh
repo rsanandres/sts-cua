@@ -18,7 +18,9 @@ stop() {  # stop <description> <pkill pattern args...>
 # Agent runs (python -m sts_cua, sts_cua.supervisor, sts_cua.memory, sts_cua.eval) but not the control
 # app (python -m sts_cua.app). Same pattern as sts_cua.app.procs.AGENT_PATTERN.
 stop "agent runs" -f 'python[0-9.]* -m sts_cua(\.supervisor|\.memory|\.eval)?( |$)'
-stop "local model server" -f "vllm serve|vllm.entrypoints|llama-server"
+# vLLM or llama-server (python -m sts_cua.serve, the app's Model server card, or by hand).
+# Same pattern as sts_cua.app.procs.MODEL_PATTERN.
+stop "local model server" -f 'vllm[ ]serve|vllm[.]entrypoints|^[^ ]*llama-server( |$)'
 # Spire 2 saves at every room; a kill loses at most the current room's progress.
 stop "Spire 2" -x SlayTheSpire2
 if pgrep -x steam >/dev/null; then
