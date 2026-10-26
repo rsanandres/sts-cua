@@ -71,6 +71,17 @@ def test_models_dir_setting(tmp_path, monkeypatch):
     assert serve.models_root(tmp_path / "flag", windows) == tmp_path / "flag"
 
 
+def test_models_dir_follows_the_downloads(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("STS_CUA_MODELS", raising=False)
+    home, windows = tmp_path / "home" / "models", tmp_path / "d-models"
+    home.mkdir(parents=True)
+    (windows / MODELS["holo4-27b"].repo).mkdir(parents=True)
+    assert serve.models_root(None, windows) == windows  # an empty ~/models doesn't hide D:
+    (home / MODELS["ui-venus-2-9b"].repo).mkdir(parents=True)
+    assert serve.models_root(None, windows) == home  # both have models: ~/models first
+
+
 def test_choose_explicit_vram_refusal_and_force():
     have = set(MODELS)
     m, reason = serve.choose("holo4-27b", "solo", 21.0, have)

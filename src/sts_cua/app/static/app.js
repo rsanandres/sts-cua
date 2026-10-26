@@ -349,6 +349,7 @@
     } else {
       info = `${m.server === "llama" ? "llama.cpp" : "vLLM"} · needs ${m.need_gib.toFixed(1)} GiB · ${free} · license ${dash(m.license)}. ${m.notes || ""}`;
     }
+    if (lastModels.root) info += ` Models folder: ${lastModels.root}.`;
     setText("model-info", info);
 
     const bar = $("model-progress");

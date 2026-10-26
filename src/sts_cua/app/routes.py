@@ -437,7 +437,7 @@ class App(BenchRoutes):
             pick = serve.best(limit, have)
             best[mode] = pick.name if pick else None
         return {
-            "models": rows, "best": best, "gpu": reading,
+            "models": rows, "best": best, "gpu": reading, "root": str(root),
             "server": {"running": running["running"], "pid": running["pid"], "model": current,
                        "mode": record.get("mode"), "served": ids, "port": record.get("port", self.config.model_port),
                        "ready": bool(running["running"] and ids)},
