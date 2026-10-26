@@ -121,6 +121,28 @@ Make footage from any run with `python -m sts_cua.replay runs/<run>` (see the RE
 - It got lost leaving the merchant again, about 9 steps between the shop and the tent's Proceed. Every model has done this in every run.
 - Cost: $0.0064 per step, about $0.10 per floor. A full run on Sonnet looks like about $5.
 
+### Why the last fight went wrong
+
+- The PC session ran the logged states of the long run back through a new check, `tools/stall_check.py`. On floor 28 the game state didn't change for 15 steps in a row (steps 403-417), even though the screen kept changing.
+- The cause, found in the screenshots: with one card left in hand, Sonnet believed the card was already selected and kept clicking the enemy. The same thing happened on floor 9. When it pressed the number and clicked in the same step (step 418), it worked first try.
+- Two fixes:
+  - The harness now ends a run as "stalled" after 15 acting steps with an identical game state (PR #25). Menu and game-over screens are exempt, because the Timeline and story screens after a death look unchanged to the mod for 36 steps (PR #26).
+  - The prompt (PR #27, written by the PC session with Raph) now says: press the number and click together; a glowing card in hand is not selected; leave the merchant with `m`; check potions at the start of every turn; add up enemy attacks and block first.
+
+### Testing the fixes
+
+- Run `20261025T232600Z` (Ironclad, Sonnet): died on floor 7, 130 steps, $0.84.
+  - The shop is fixed: it walked in, bought Vicious and Thunderclap, and left with the back arrow and `m` in 4 steps.
+  - No targeting stalls.
+  - It still never touched any of its three potions, and it ended most turns with Defends unplayed.
+- Run `20261025T234921Z` (with the turn-start potion check): reached floor 10 at 52/80 HP in 88 steps for $0.55. Then the API's monthly spend limit in the Console stopped it. Raph raised the limit.
+- Run `20261026T000948Z`: continued from floor 10 and died to the Act 1 boss, the Ceremonial Beast, on floor 17. 137 steps, $0.91, 24 minutes of `screen.mp4`.
+  - Floor 12 elite, Byrdonis: it opened the potion menu for the first time (a Fortifier), changed its mind, and pressed Escape to close it. Escape opened the pause menu instead. It never went back to the potion.
+  - Boss, turn 1: "This is a boss fight, so I'll use one first." It clicked the slot, then Drink. **The first potion any model has drunk**: a Dexterity Potion.
+  - The boss's hits grew from 28 to 36. Sonnet blocked 24-33 a turn but did too little damage, and at 9 HP it wrote "I'll take about 12 damage and likely die" and ended the turn with two potions still in its slots. The rule fired on turn 1 and was never checked again.
+  - It also skipped two potion rewards because its slots were full, instead of drinking one to make room.
+- Next fix (the PC session): re-check potions every turn, drink everything useful before a turn that could kill, close a potion menu without Escape, and make room in full slots.
+
 ## Clip ideas
 
 - The 39-click loop on a visited node (`20261025T165758Z`).
@@ -134,4 +156,6 @@ Make footage from any run with `python -m sts_cua.replay runs/<run>` (see the RE
 - Sonnet beats Vantom with poison stacks (`20261025T194812Z`, floor 17).
 - Spending 512 gold at the Act 2 shop, then getting lost leaving it (`20261025T194812Z`, floor 22).
 - The last stand at 3 HP: clicks that don't land, potions never touched (`20261025T194812Z`, floor 28).
+- The first potion ever drunk, on turn 1 of the Ceremonial Beast fight (`20261026T000948Z`, step 91).
+- "I'll take about 12 damage and likely die", with two potions in the slots (`20261026T000948Z`, step 135).
 - Haiku vs Sonnet on the same floors, with the cost per floor.
