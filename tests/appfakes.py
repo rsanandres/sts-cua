@@ -143,6 +143,9 @@ class Running:
     repo: Path
     state_dir: Path
     token: str
+    models_dir: Path = None
+    gpu: dict = field(default_factory=dict)  # what the app reads as nvidia-smi; empty: unreadable
+    ready: list = field(default_factory=list)  # [True] once the fake model server "answers"
 
     @property
     def app(self):
@@ -166,21 +169,30 @@ def own_pgrep(args: list[str]) -> list[int]:
 def start_server(tmp_path: Path, capture=None) -> Running:
     repo = make_repo(tmp_path)
     state_dir = tmp_path / "state"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    llama = bin_dir / "llama-server"
+    llama.write_text("#!/bin/sh\nsleep 60\n")
+    llama.chmod(0o755)
     config = AppConfig(
         repo=repo, state_dir=state_dir, token_file=state_dir / "app-token", port=0,
         state_url="http://127.0.0.1:9/api/v1/singleplayer", python="/venv/bin/python",
         vllm="/opt/vllm/bin/vllm", nvidia_smi=("/nonexistent/nvidia-smi",), shutdown_delay=0.05,
+        llama_server=str(llama), models_dir=tmp_path / "models",
     )
     launcher = FakeLauncher()
     procs = ProcessManager(state_dir, launcher=launcher, find=own_pgrep)
-    kwargs = {"clock": lambda: NOW}
+    gpu = {"used_mib": 4000, "free_mib": 20000, "total_mib": 24564}
+    ready: list = []
+    kwargs = {"clock": lambda: NOW, "vram": lambda: dict(gpu) if gpu else None,
+              "probe": lambda server, port: bool(ready), "served": lambda port: ["holo4-27b"] if ready else None}
     if capture is not None:
         kwargs["capture"] = capture
     server = make_server(config, procs, **kwargs)
     threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
     token = (state_dir / "app-token").read_text().strip()
     client = Client(f"http://127.0.0.1:{server.server_address[1]}", token)
-    return Running(server, client, launcher, repo, state_dir, token)
+    return Running(server, client, launcher, repo, state_dir, token, config.models_dir, gpu, ready)
 
 
 def stop_server(running: Running) -> None:

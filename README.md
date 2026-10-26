@@ -118,7 +118,7 @@ Claude needs `ANTHROPIC_API_KEY` (or an `ant auth login` profile). Each run writ
 
 ### With the local model
 
-Start vLLM in WSL with the command in [docs/hosting.md](docs/hosting.md#model), then point the harness at it:
+Start the model server in WSL with `python -m sts_cua.serve start <model> --mode coop|solo` (or `start best`; `list`, `download`, `status` and `stop` too; see [docs/hosting.md](docs/hosting.md#serving-the-local-models)), or the vLLM command in [docs/hosting.md](docs/hosting.md#model). Then point the harness at it:
 
 ```
 .venv/bin/python -m sts_cua --display :99 --model qwen3-vl-8b --max-steps 20
@@ -279,7 +279,7 @@ On Windows, `tools/windows/sts-cua-app.cmd` starts the server in WSL if it isn't
 
 - Stdlib only (`ThreadingHTTPServer`), bound to 127.0.0.1. Every `/api/` call except `/api/health` needs the token in `~/.sts-cua/app-token` (mode 600), as a Bearer header or the HttpOnly, SameSite=Strict cookie that `/login?token=...` sets. No localhost exemption, since `tailscale serve` traffic also arrives from localhost. POSTs must be JSON.
 - Fixed actions only: argv lists built from validated fields (model allowlist, clamped numbers, names matching `^[\w.-]+$`, paths kept inside `runs/`), never a command string from a request.
-- Children it starts (supervisor, vLLM, `stack_up.sh`, reflect) get pid files in `~/.sts-cua/run/`, so a restarted app still knows them, and log to `~/.sts-cua/logs/`. Processes started elsewhere are found with pgrep.
+- Children it starts (supervisor, the model server, model downloads, `stack_up.sh`, reflect) get pid files in `~/.sts-cua/run/`, so a restarted app still knows them, and log to `~/.sts-cua/logs/`. Processes started elsewhere are found with pgrep.
 - `tools/stack_down.sh` stops agent runs with a pattern that leaves `python -m sts_cua.app` running.
 - `src/sts_cua/app/`: `server.py` (HTTP, auth, static page), `routes.py` (endpoints), `procs.py` (processes), `files.py` (tailing logs, run dirs), `static/` (the page).
 

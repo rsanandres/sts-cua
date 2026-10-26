@@ -21,7 +21,7 @@ def test_status(app_server, tmp_path):
     (run / "memory_reflect.json").write_text(json.dumps({"cost_usd": 0.05, "time": "2026-10-25T18:30:00+00:00"}))
     status, body = app_server.client.get("/api/status")
     assert status == 200
-    assert set(body["processes"]) == {"steam", "xvfb", "game", "vllm", "supervisor"}
+    assert set(body["processes"]) == {"steam", "xvfb", "game", "model", "supervisor"}
     for p in body["processes"].values():
         assert p == {"running": False, "pid": None, "since": None}
     assert body["gpu"] is None
