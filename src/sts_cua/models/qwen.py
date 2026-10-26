@@ -24,6 +24,8 @@ https://github.com/QwenLM/Qwen3-VL/blob/main/cookbooks/utils/agent_function_call
 
 The tool definition goes into the system prompt as text, as in the cookbooks, so vLLM
 needs no tool-call parser flags and the reply's <tool_call> blocks arrive in `content`.
+The request plumbing, coordinate scaling and run-log fields are shared with the other
+local families in models/local.py; models/qwen38.py builds on this adapter.
 Decision.raw keeps the request (image replaced by a placeholder; the screenshot is saved
 next to the step), the raw reply, usage, per-token logprobs and token IDs when vLLM
 returns them, so runs/ can be turned into SFT and RL data later.
@@ -31,29 +33,26 @@ returns them, so runs/ can be turned into SFT and RL data later.
 
 from __future__ import annotations
 
-import base64
-import dataclasses
-import hashlib
-import io
 import json
-import logging
-import re
-import urllib.error
-import urllib.request
 from dataclasses import dataclass
-from typing import Callable
 
-from PIL import Image
-
-from ..actions import Action, Click, Drag, Key, MouseMove, Scroll, TypeText, Wait, describe
+from ..actions import Action, Click, Drag, Key, MouseMove, Scroll, TypeText, Wait
 from .. import coop as _coop
-from .base import Decision, Observation, Usage
+from .base import Observation
 from .claude import SYSTEM_PROMPT as _CLAUDE_PROMPT
+from .local import (
+    DEFAULT_GOAL, MAX_SCROLL, Cursor, Finish, LocalAdapter, LocalConfig, Reply, Transport, adapt_prompt as _adapt,
+    describe_scaled, join_keys, parse_tool_body, post_json, scale_point, scroll_amount, server_reasoning,
+    server_tool_calls, split_think, split_tool_calls, to_keysym, to_scale,
+)
 
-log = logging.getLogger(__name__)
+__all__ = [
+    "COMPUTER_USE_TOOL", "DEFAULT_GOAL", "MAX_SCROLL", "QwenConfig", "QwenModel", "SCALE", "SYSTEM_PROMPT",
+    "Transport", "adapt_prompt", "describe_relative", "parse_call", "post_json", "split_reply", "to_action",
+    "to_keysym", "to_pixels", "to_relative",
+]
 
 SCALE = 1000  # the model's coordinate range in both directions
-MAX_SCROLL = 10  # wheel clicks per scroll action
 
 # Verbatim from ComputerUse in the cookbook's utils/agent_function_call.py, at 1000x1000.
 COMPUTER_USE_TOOL = {
@@ -156,125 +155,43 @@ _PROMPT_EDITS = (
 
 def adapt_prompt(prompt: str, strict: bool = False) -> str:
     """Rewrite pixel-coordinate and DONE instructions for this model. strict: every edit must apply."""
-    for old, new in _PROMPT_EDITS:
-        if old in prompt:
-            prompt = prompt.replace(old, new)
-        elif strict:
-            raise ValueError(f"Spire prompt changed; update qwen._PROMPT_EDITS for: {old!r}")
-    return prompt
+    return _adapt(prompt, _PROMPT_EDITS, "qwen._PROMPT_EDITS", strict)
 
 
 SYSTEM_PROMPT = adapt_prompt(_CLAUDE_PROMPT)  # tests check every edit still applies
 
-DEFAULT_GOAL = "Play Slay the Spire 2 and win the run."
-
 
 @dataclass
-class QwenConfig:
-    base_url: str = "http://localhost:8000/v1"
+class QwenConfig(LocalConfig):
     served_model: str = "Qwen/Qwen3-VL-8B-Instruct-FP8"  # vLLM's --served-model-name, or a LoRA adapter's name
-    api_key: str | None = None  # only if vLLM runs with --api-key
     temperature: float = 0.7
     top_p: float = 0.8
     top_k: int = 20
     max_tokens: int = 512
-    seed: int | None = None
-    history_steps: int = 8
-    goal: str | None = None
     system_prompt: str = SYSTEM_PROMPT  # the tool definition and response format are appended to it
-    logprobs: bool = True
-    top_logprobs: int = 0  # alternatives per token, 0 to 20
     return_token_ids: bool = True  # vLLM extension; servers without it ignore the field
     timeout: float = 120.0
-    coop: bool = False  # co-op with a human teammate: coop.PROMPT goes after the system prompt
-
-
-# (url, payload, headers, timeout) -> response JSON. Swapped out in tests.
-Transport = Callable[[str, dict, dict, float], dict]
-
-
-def post_json(url: str, payload: dict, headers: dict, timeout: float) -> dict:
-    request = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            return json.loads(response.read())
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", "replace")[:2000]
-        raise RuntimeError(f"vLLM returned HTTP {exc.code}: {body}") from exc
-
-
-def _png(image: Image.Image) -> bytes:
-    buffer = io.BytesIO()
-    image.save(buffer, format="PNG")
-    return buffer.getvalue()
 
 
 def to_pixels(value, screen_size: tuple[int, int]) -> tuple[int, int] | None:
     """A 0-1000 (x, y) from the model to screen pixels, clamped to the screen."""
-    if isinstance(value, str):
-        value = re.findall(r"-?\d+(?:\.\d+)?", value)
-    if not isinstance(value, (list, tuple)) or len(value) != 2:
-        return None
-    try:
-        rx, ry = float(value[0]), float(value[1])
-    except (TypeError, ValueError):
-        return None
-    width, height = screen_size
-    x = min(max(round(rx / SCALE * width), 0), width - 1)
-    y = min(max(round(ry / SCALE * height), 0), height - 1)
-    return x, y
+    return scale_point(value, screen_size, SCALE)
 
 
 def to_relative(x: int, y: int, screen_size: tuple[int, int]) -> tuple[int, int]:
-    return round(x / screen_size[0] * SCALE), round(y / screen_size[1] * SCALE)
+    return to_scale(x, y, screen_size, SCALE)
 
 
 def describe_relative(action: Action, screen_size: tuple[int, int]) -> str:
     """describe(), with coordinates on the model's 0-1000 scale."""
-    if isinstance(action, (Click, MouseMove)) or (isinstance(action, Scroll) and action.x is not None):
-        x, y = to_relative(action.x, action.y, screen_size)
-        action = dataclasses.replace(action, x=x, y=y)
-    elif isinstance(action, Drag):
-        x0, y0 = to_relative(action.x0, action.y0, screen_size)
-        x1, y1 = to_relative(action.x1, action.y1, screen_size)
-        action = Drag(x0, y0, x1, y1)
-    return describe(action)
-
-
-_KEYSYMS = {
-    "enter": "Return", "return": "Return", "esc": "Escape", "escape": "Escape", "tab": "Tab", "space": "space",
-    "backspace": "BackSpace", "delete": "Delete", "del": "Delete", "insert": "Insert",
-    "up": "Up", "down": "Down", "left": "Left", "right": "Right", "home": "Home", "end": "End",
-    "pageup": "Page_Up", "page_up": "Page_Up", "pgup": "Page_Up",
-    "pagedown": "Page_Down", "page_down": "Page_Down", "pgdn": "Page_Down",
-    "ctrl": "ctrl", "control": "ctrl", "alt": "alt", "shift": "shift",
-    "cmd": "super", "command": "super", "win": "super", "super": "super", "meta": "super",
-}
-
-
-def to_keysym(name: str) -> str:
-    """A key name as the model writes it ("enter", "E", "esc") to an xdotool keysym."""
-    name = name.strip()
-    lower = name.lower()
-    if lower in _KEYSYMS:
-        return _KEYSYMS[lower]
-    if re.fullmatch(r"f\d{1,2}", lower):
-        return lower.upper()
-    if len(name) == 1:
-        return lower  # "E" would otherwise send shift+e
-    return name
+    return describe_scaled(action, screen_size, SCALE)
 
 
 def _keys(args: dict) -> str | None:
     keys = args.get("keys")
     if keys is None:
         keys = args.get("text") or args.get("key")
-    if isinstance(keys, str):
-        keys = [keys]
-    if not isinstance(keys, list) or not keys:
-        return None
-    names = [part for key in keys for part in str(key).split("+") if part.strip()]
-    return "+".join(to_keysym(n) for n in names) or None
+    return join_keys(keys)
 
 
 _CLICKS = {
@@ -287,37 +204,46 @@ _CLICKS = {
 }
 
 
-def to_action(args: dict, screen_size: tuple[int, int], pointer: tuple[int, int] | None) -> Action | None:
+def _modifiers(text) -> str | None:
+    """A click's optional `text` of held modifiers (Qwen-CUA's tool), e.g. "ctrl+shift"."""
+    if not isinstance(text, str) or not text.strip():
+        return None
+    keys = [to_keysym(k) for k in text.split("+") if k.strip()]
+    return "+".join(keys) if keys and all(k in ("ctrl", "shift", "alt", "super") for k in keys) else None
+
+
+def to_action(args: dict, screen_size: tuple[int, int], pointer: tuple[int, int] | None, point=to_pixels) -> Action | None:
     """One computer_use call to an action in screen pixels, or None if it can't run here.
 
     pointer is where the cursor is before this call; left_click_drag starts from it.
+    point maps the model's coordinate to pixels (0-1000 rounded by default).
     """
     name = args.get("action")
     if name in _CLICKS:
-        point = to_pixels(args.get("coordinate"), screen_size)
-        if point is None:
+        target = point(args.get("coordinate"), screen_size)
+        if target is None:
             return None  # a click at the current cursor; the harness always clicks at a point
         button, count = _CLICKS[name]
-        return Click(*point, button=button, count=count)
+        return Click(*target, button=button, count=count, modifiers=_modifiers(args.get("text")))
     if name == "mouse_move":
-        point = to_pixels(args.get("coordinate"), screen_size)
-        return MouseMove(*point) if point else None
+        target = point(args.get("coordinate"), screen_size)
+        return MouseMove(*target) if target else None
     if name == "left_click_drag":
-        start = to_pixels(args["start_coordinate"], screen_size) if "start_coordinate" in args else pointer
-        end = to_pixels(args.get("coordinate"), screen_size)
+        start = point(args["start_coordinate"], screen_size) if "start_coordinate" in args else pointer
+        end = point(args.get("coordinate"), screen_size)
         return Drag(*start, *end) if start and end else None
     if name in ("scroll", "hscroll"):
         pixels = float(args.get("pixels", 0))
         if pixels == 0:
             return None
         # The cookbook passes pixels to pyautogui.scroll, which on X11 counts wheel clicks.
-        amount = min(max(round(abs(pixels)), 1), MAX_SCROLL)
+        amount = scroll_amount(pixels)
         if name == "scroll":
             direction = "up" if pixels > 0 else "down"
         else:
             direction = "right" if pixels > 0 else "left"
-        point = to_pixels(args.get("coordinate"), screen_size)
-        x, y = point if point else (None, None)
+        target = point(args.get("coordinate"), screen_size)
+        x, y = target if target else (None, None)
         return Scroll(direction, amount, x, y)
     if name == "key":
         keys = _keys(args)
@@ -330,71 +256,42 @@ def to_action(args: dict, screen_size: tuple[int, int], pointer: tuple[int, int]
     return None
 
 
-def _pointer_after(action: Action) -> tuple[int, int] | None:
-    if isinstance(action, (Click, MouseMove)):
-        return action.x, action.y
-    if isinstance(action, Drag):
-        return action.x1, action.y1
-    if isinstance(action, Scroll) and action.x is not None:
-        return action.x, action.y
-    return None
-
-
-_TOOL_CALL = re.compile(r"<tool_call>(.*?)(?:</tool_call>|\Z)", re.DOTALL)
-_THINK = re.compile(r"<think>(.*?)(?:</think>|\Z)", re.DOTALL)
-
-
 def split_reply(text: str) -> tuple[str, str, list[str]]:
     """(reasoning inside <think>, text before the first tool call, each tool call's body)."""
-    reasoning = " ".join(m.strip() for m in _THINK.findall(text))
-    text = _THINK.sub("", text)
-    if "</think>" in text:  # Thinking variants open <think> in the prompt, so only the close arrives
-        head, text = text.split("</think>", 1)
-        reasoning = " ".join(p for p in (head.strip(), reasoning) if p)
-    calls = [m.strip() for m in _TOOL_CALL.findall(text)]
-    before = text.split("<tool_call>", 1)[0]
-    return reasoning, " ".join(before.split()), calls
+    reasoning, text = split_think(text)
+    before, calls = split_tool_calls(text)
+    return reasoning, before, calls
 
 
 def parse_call(body: str) -> dict:
-    """The arguments of one <tool_call> body. Raises ValueError when it isn't a computer_use call."""
-    try:
-        call = json.loads(body)
-    except json.JSONDecodeError:
-        # Trailing junk after the object, e.g. a missing </tool_call> before more text.
-        call, _ = json.JSONDecoder().raw_decode(body)
-    if not isinstance(call, dict):
-        raise ValueError("tool call is not a JSON object")
-    if call.get("name", "computer_use") != "computer_use":
-        raise ValueError(f"unknown function {call.get('name')!r}")
-    args = call.get("arguments", {})
-    if isinstance(args, str):
-        args = json.loads(args)
-    if not isinstance(args, dict) or "action" not in args:
+    """The arguments of one <tool_call> body (JSON or Qwen3.5+ XML). Raises ValueError when it isn't a computer_use call."""
+    name, args = parse_tool_body(body)
+    if (name or "computer_use") != "computer_use":
+        raise ValueError(f"unknown function {name!r}")
+    if "action" not in args:
         raise ValueError("arguments have no action")
     return args
 
 
-class QwenModel:
+class QwenModel(LocalAdapter):
+    family = "qwen3-vl"
+    scale = SCALE
+    sampling_defaults = {False: (0.7, 0.8, 20)}  # model card; QwenConfig sets them explicitly
+    system_prompt = SYSTEM_PROMPT
+    config_class = QwenConfig
+    tools_text = TOOLS_TEXT
+    response_format = RESPONSE_FORMAT
+
     def __init__(self, config: QwenConfig | None = None, transport: Transport | None = None):
-        self.config = config or QwenConfig()
-        self.name = f"{self.config.served_model} temperature={self.config.temperature}"
-        self._transport = transport or post_json
+        super().__init__(config, transport)
 
     def system_text(self) -> str:
         coop = _coop.PROMPT if self.config.coop else ""
-        return self.config.system_prompt + coop + TOOLS_TEXT + RESPONSE_FORMAT
+        return self.config.system_prompt + coop + self.tools_text + self.response_format
 
     def user_text(self, obs: Observation) -> str:
-        size = obs.screenshot.size
-        history = obs.history[-self.config.history_steps:]
-        if history:
-            lines = []
-            for entry in history:
-                done = "; ".join(describe_relative(a, size) for a in entry.actions) or "no action"
-                effect = " -> the screen did not change" if entry.unchanged else ""
-                note = f" ({entry.thought})" if entry.thought else ""
-                lines.append(f"Step {entry.step}: {done}{effect}{note}")
+        lines = self.history_lines(obs)
+        if lines:
             progress = f"Task progress (your recent steps, coordinates on the 0-{SCALE} scale):\n" + "\n".join(lines)
         else:
             progress = "Task progress: this is the first step."
@@ -404,142 +301,33 @@ class QwenModel:
             parts.append(f"Notes:\n{notes}")
         return "\n\n".join(parts)
 
-    def build_request(self, obs: Observation) -> tuple[dict, dict]:
-        """(request, the same request with the image replaced by a placeholder, for the log)."""
-        png = _png(obs.screenshot)
-        image_url = "data:image/png;base64," + base64.standard_b64encode(png).decode("ascii")
+    def user_content(self, obs: Observation, image_url: str) -> list[dict]:
+        return [
+            {"type": "text", "text": self.user_text(obs)},
+            {"type": "image_url", "image_url": {"url": image_url}},
+        ]
 
-        def messages(url: str) -> list[dict]:
-            return [
-                {"role": "system", "content": [{"type": "text", "text": self.system_text()}]},
-                {"role": "user", "content": [
-                    {"type": "text", "text": self.user_text(obs)},
-                    {"type": "image_url", "image_url": {"url": url}},
-                ]},
-            ]
-
-        c = self.config
-        params = {
-            "model": c.served_model,
-            "max_tokens": c.max_tokens,
-            "temperature": c.temperature,
-            "top_p": c.top_p,
-            "top_k": c.top_k,  # vLLM sampling extension
-        }
-        if c.seed is not None:
-            params["seed"] = c.seed
-        if c.logprobs:
-            params["logprobs"] = True
-            if c.top_logprobs:
-                params["top_logprobs"] = c.top_logprobs
-        if c.return_token_ids:
-            params["return_token_ids"] = True
-        width, height = obs.screenshot.size
-        placeholder = f"<screenshot {width}x{height} png sha256={hashlib.sha256(png).hexdigest()}>"
-        return {**params, "messages": messages(image_url)}, {**params, "messages": messages(placeholder)}
-
-    def decide(self, obs: Observation) -> Decision:
-        request, logged = self.build_request(obs)
-        headers = {"Content-Type": "application/json"}
-        if self.config.api_key:
-            headers["Authorization"] = f"Bearer {self.config.api_key}"
-        url = self.config.base_url.rstrip("/") + "/chat/completions"
-        response = self._transport(url, request, headers, self.config.timeout)
-        return self.parse(response, obs, logged)
-
-    def parse(self, response: dict, obs: Observation, logged_request: dict | None = None) -> Decision:
-        choices = response.get("choices") or []
-        if not choices:
-            raise RuntimeError(f"vLLM response has no choices: {json.dumps(response)[:500]}")
-        choice = choices[0]
-        message = choice.get("message") or {}
-        text = message.get("content") or ""
+    def read_reply(self, text: str, message: dict) -> Reply:
         reasoning, thought, bodies = split_reply(text)
-        reasoning = message.get("reasoning_content") or message.get("reasoning") or reasoning
+        reasoning = server_reasoning(message) or reasoning
         # A server started with a tool-call parser moves the calls out of content.
-        for tc in message.get("tool_calls") or []:
-            fn = tc.get("function") or {}
-            bodies.append(json.dumps({"name": fn.get("name"), "arguments": fn.get("arguments", "{}")}))
-
-        size = obs.screenshot.size
-        earlier = [a for entry in obs.history for a in entry.actions]
-        pointer = next((p for p in map(_pointer_after, reversed(earlier)) if p), None)
-        actions: list[Action] = []
-        calls, skipped, errors = [], [], []
-        terminate = answer = None
+        bodies += server_tool_calls(message)
+        calls, errors = [], []
         for body in bodies:
             try:
-                args = parse_call(body)
+                calls.append(parse_call(body))
             except (ValueError, json.JSONDecodeError) as exc:
-                log.warning("unparsed tool call %r: %s", body[:200], exc)
                 errors.append(f"{exc}: {body[:200]}")
-                continue
-            calls.append(args)
-            name = args.get("action")
-            if name == "terminate":
-                terminate = str(args.get("status", "success"))
-                continue
-            if name == "answer":
-                answer = str(args.get("text", ""))
-                continue
-            try:
-                action = to_action(args, size, pointer)
-            except (KeyError, TypeError, ValueError) as exc:
-                log.warning("bad arguments %r: %s", args, exc)
-                action = None
-            if action is None:
-                skipped.append(str(name))
-                continue
-            actions.append(action)
-            pointer = _pointer_after(action) or pointer
+        return Reply(thought, reasoning, calls, errors)
 
-        if answer:
-            thought = (thought + f" Answer: {answer}").strip()
-        if skipped:
-            thought = (thought + f" [skipped unsupported: {', '.join(skipped)}]").strip()
-        if errors:
-            thought = (thought + f" [unparsed tool call x{len(errors)}]").strip()
-        if not bodies and text.strip():
-            log.warning("reply has no tool call: %r", text[:200])
+    def call_name(self, call) -> str:
+        return str(call.get("action"))
 
-        finish = choice.get("finish_reason")
-        if terminate is not None:
-            stop_reason = f"terminate_{terminate}"
-        elif answer is not None:
-            stop_reason = "answer"
-        else:
-            stop_reason = finish
-        done = terminate is not None or answer is not None
-        if not bodies and not actions:
-            done = re.search(r"\bDONE\b", thought) is not None
-
-        u = response.get("usage") or {}
-        usage = Usage(
-            input_tokens=u.get("prompt_tokens") or 0,
-            output_tokens=u.get("completion_tokens") or 0,
-            cache_read_input_tokens=(u.get("prompt_tokens_details") or {}).get("cached_tokens") or 0,
-            cost_usd=0.0,
-        )
-        logprobs = choice.get("logprobs") or {}
-        raw = {
-            "request": logged_request,
-            "response_text": text,
-            "id": response.get("id"),
-            "model": response.get("model"),
-            "finish_reason": finish,
-            "usage": u,
-            "logprobs": logprobs.get("content"),
-            "prompt_token_ids": response.get("prompt_token_ids") or choice.get("prompt_token_ids"),
-            "token_ids": choice.get("token_ids"),
-            "tool_calls": calls,  # arguments as the model wrote them, 0-1000 coordinates
-            "parse_errors": errors,
-        }
-        return Decision(
-            thought=thought,
-            actions=actions,
-            reasoning=reasoning,
-            stop_reason=stop_reason,
-            done=done,
-            usage=usage,
-            raw=raw,
-        )
+    def convert(self, call: dict, screen_size: tuple[int, int], cursor: Cursor) -> list | None:
+        name = call.get("action")
+        if name == "terminate":
+            return [Finish(f"terminate_{call.get('status', 'success')}")]
+        if name == "answer":
+            return [Finish("answer", str(call.get("text", "")))]
+        action = to_action(call, screen_size, cursor.pointer, self.point)
+        return [action] if action else None

@@ -125,7 +125,7 @@ Start vLLM in WSL with the command in [docs/hosting.md](docs/hosting.md#model), 
 .venv/bin/python -m sts_cua --display :99 --model qwen3-vl-8b --base-url http://localhost:8000/v1 --served-model my-lora --temperature 0
 ```
 
-`--served-model` defaults to `Qwen/Qwen3-VL-8B-Instruct-FP8`, the name `vllm serve` gives it; pass a LoRA adapter's name to run that instead. Set `VLLM_API_KEY` if vLLM runs with `--api-key`. The adapter uses Qwen3-VL's own `computer_use` tool and `<tool_call>` format, with coordinates on a 0-1000 scale converted to screen pixels. Its steps cost $0, and each step's `raw` holds the request (screenshot replaced by a placeholder; it's saved next to the step), the reply text, token usage, per-token logprobs and token IDs, for building SFT and RL data later.
+`--served-model` defaults to `Qwen/Qwen3-VL-8B-Instruct-FP8`, the name `vllm serve` gives it; pass a LoRA adapter's name to run that instead. Set `VLLM_API_KEY` (or `LLAMA_API_KEY`) if the server runs with `--api-key`. The adapter uses Qwen3-VL's own `computer_use` tool and `<tool_call>` format, with coordinates on a 0-1000 scale converted to screen pixels. The other `--model` names in `src/sts_cua/models/registry.py` (`qwen3.8-27b`, `holo4-27b`, `ui-venus-2-9b`, ...) run on llama-server the same way, at the registry's served name. `--local-thinking on|off` switches their thinking mode (`chat_template_kwargs: {"enable_thinking": ...}`); left unset it is off in co-op and the registry's default otherwise, and `--local-effort low|medium|xhigh` sets the reasoning effort when it is on. Thinking text is logged as the step's `reasoning` and never shown to the model again. Its steps cost $0, and each step's `raw` holds the request (screenshot replaced by a placeholder; it's saved next to the step), the reply text, token usage, per-token logprobs and token IDs, for building SFT and RL data later.
 
 Code map:
 
@@ -134,6 +134,8 @@ Code map:
 - `src/sts_cua/models/factory.py`: `add_model_args(parser)` and `build_model(args)`, shared by every CLI that picks a model.
 - `src/sts_cua/models/claude.py`: Claude adapter on the `computer_toolset_20260801` tool. Each step is a fresh request (cached system prompt and tools, a text log of recent steps, the current screenshot), so nothing is replayed and cost per step stays flat.
 - `src/sts_cua/models/qwen.py`: Qwen3-VL adapter for vLLM's OpenAI-compatible server, the same fresh request each step.
+- `src/sts_cua/models/local.py`: the base the local adapters share (request, thinking switch, coordinate scaling, run-log fields including llama-server `timings`).
+- `src/sts_cua/models/qwen38.py`, `holo4.py`, `ui_venus.py`: adapters for the registry's Qwen3.8, Holo4 and UI-Venus-2 families, each in its model's own computer-use format (sources in each module's docstring). `factory.py` picks one by the model's registry `family`.
 - `src/sts_cua/screen.py`: `X11Screen` (mss capture, xdotool input) and `FakeScreen` for tests.
 - `src/sts_cua/runlog.py`, `src/sts_cua/pricing.py`: run logs and per-step cost.
 - `src/sts_cua/memory/`: lessons carried between runs (see "Memory across runs").
