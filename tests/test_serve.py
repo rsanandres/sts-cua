@@ -75,11 +75,13 @@ def test_models_dir_follows_the_downloads(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.delenv("STS_CUA_MODELS", raising=False)
     home, windows = tmp_path / "home" / "models", tmp_path / "d-models"
-    home.mkdir(parents=True)
-    (windows / MODELS["holo4-27b"].repo).mkdir(parents=True)
-    assert serve.models_root(None, windows) == windows  # an empty ~/models doesn't hide D:
-    (home / MODELS["ui-venus-2-9b"].repo).mkdir(parents=True)
-    assert serve.models_root(None, windows) == home  # both have models: ~/models first
+    holo, venus = MODELS["holo4-27b"], MODELS["ui-venus-2-9b"]
+    (home / venus.repo).mkdir(parents=True)  # a folder from a download that never started
+    (windows / holo.repo).mkdir(parents=True)
+    (windows / holo.repo / (holo.mmproj.name + ".part")).write_bytes(b"x" * 10)
+    assert serve.models_root(None, windows) == windows  # D: holds the files
+    (home / venus.repo / (venus.mmproj.name + ".part")).write_bytes(b"x" * 10)
+    assert serve.models_root(None, windows) == home  # a tie: ~/models
 
 
 def test_choose_explicit_vram_refusal_and_force():

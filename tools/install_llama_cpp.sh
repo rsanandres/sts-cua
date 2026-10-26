@@ -17,8 +17,9 @@
 # meta-packages, which pull a Linux driver in.
 #
 # Prebuilt: the release page lists llama-<tag>-bin-ubuntu-cuda-12.8-x64.tar.gz plus a
-# cudart-... archive with the CUDA runtime (seen 2026-10-26 for b11900), so no toolkit is
-# needed; the Windows driver must support CUDA 12.8. The archive layout is not checked on
+# cudart-... archive with the CUDA runtime (seen 2026-10-26 for b11900; a cuda-13.4 pair too),
+# so no toolkit is needed; the Windows driver must support CUDA 12.8 (Raph's reports 13.4).
+# The b<N> releases are marked pre-release, so the newest tag comes from the releases feed. The archive layout is not checked on
 # the PC yet: the script finds llama-server inside it and checks its libraries with ldd.
 set -euo pipefail
 
@@ -57,20 +58,30 @@ build_from_source() {
 }
 
 install_prebuilt() {
-  local tag=${1:-}
-  if [ -z "$tag" ]; then
-    tag=$(curl -fsSL -o /dev/null -w '%{url_effective}' "$REPO_URL/releases/latest" | sed 's#.*/tag/##')
+  local tags=${1:-}
+  if [ -z "$tags" ]; then
+    # The b<N> builds are all marked pre-release, so releases/latest points at an old v0.x
+    # release; the releases feed lists the builds newest first. The newest may not have its
+    # archives uploaded yet, so try the first few.
+    tags=$(curl -fsSL "$REPO_URL/releases.atom" | grep -oE '/releases/tag/b[0-9]+' | sed 's#.*/tag/##' | head -n 5 || true)
   fi
-  [[ "$tag" =~ ^b[0-9]+$ ]] || { log "couldn't tell the release tag (got '$tag'); pass one, e.g. --prebuilt b11900"; exit 1; }
-  local tmp
+  [ -n "$tags" ] || { log "couldn't read the release list; pass a tag, e.g. --prebuilt b11900"; exit 1; }
+  local tmp tag="" t name
   tmp=$(mktemp -d)
-  trap 'rm -rf "$tmp"' EXIT
-  for name in "llama-$tag-bin-ubuntu-cuda-12.8-x64.tar.gz" "cudart-llama-$tag-bin-ubuntu-cuda-12.8-x64.tar.gz"; do
-    log "downloading $name"
-    curl -fL --retry 3 -o "$tmp/$name" "$REPO_URL/releases/download/$tag/$name"
+  trap "rm -rf '$tmp'" EXIT  # expanded now: $tmp is local and gone by exit
+  for t in $tags; do
+    [[ "$t" =~ ^b[0-9]+$ ]] || { log "not a build tag: '$t'; pass one like b11900"; exit 1; }
+    rm -rf "$tmp"/*
     mkdir -p "$tmp/x"
-    tar -xzf "$tmp/$name" -C "$tmp/x"
+    for name in "llama-$t-bin-ubuntu-cuda-12.8-x64.tar.gz" "cudart-llama-$t-bin-ubuntu-cuda-12.8-x64.tar.gz"; do
+      log "downloading $t/$name"
+      curl -fL --retry 3 -o "$tmp/$name" "$REPO_URL/releases/download/$t/$name" && tar -xzf "$tmp/$name" -C "$tmp/x" \
+        || { log "$t: couldn't fetch $name"; continue 2; }
+    done
+    tag=$t
+    break
   done
+  [ -n "$tag" ] || { log "no release among: $tags had both archives; see $REPO_URL/releases"; exit 1; }
   local found
   found=$(find "$tmp/x" -type f -name llama-server | head -n 1)
   [ -n "$found" ] || { log "no llama-server in the archives; see $REPO_URL/releases/tag/$tag"; exit 1; }

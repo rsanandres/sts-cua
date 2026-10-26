@@ -17,7 +17,7 @@ Files: llama.cpp models download into <models dir>/<repo>/ (the registry's weigh
 mmproj, nothing else); the vLLM baseline goes into the Hugging Face cache, where
 `vllm serve <repo>` looks for it (and fetches it itself on first start if missing).
 The models dir is --models-dir, else $STS_CUA_MODELS, else whichever of ~/models and
-/mnt/d/models (a Windows drive with room for several 27B models) has model folders in it. Weights on a
+/mnt/d/models (a Windows drive with room for several 27B models) holds more model files. Weights on a
 Windows drive (/mnt/...) load through WSL's drvfs, which is slower than the Linux
 filesystem, so llama-server reads them without mmap there. Each load time goes to
 logs/model.log and logs/model_loads.jsonl, for comparing the two.
@@ -64,8 +64,8 @@ class ServeError(Exception):
 # ---- where the files live
 
 def models_root(root: Path | str | None = None, windows: Path = WINDOWS_MODELS) -> Path:
-    """--models-dir, else $STS_CUA_MODELS, else whichever of ~/models and /mnt/d/models holds a
-    registry model's folder (~/models first), else /mnt/d/models if only it exists, else ~/models.
+    """--models-dir, else $STS_CUA_MODELS, else whichever of ~/models and /mnt/d/models holds
+    more bytes of registry model files (~/models on a tie), else /mnt/d/models if only it exists, else ~/models.
     The app is started by a Windows shortcut through `bash -lc`, which doesn't read ~/.bashrc, so an
     export there is easy to miss; an empty ~/models must not hide models downloaded to D:."""
     if root:
@@ -73,18 +73,18 @@ def models_root(root: Path | str | None = None, windows: Path = WINDOWS_MODELS) 
     if os.environ.get(MODELS_ENV):
         return Path(os.environ[MODELS_ENV]).expanduser()
     home = Path.home() / "models"
-    for d in (home, windows):
-        if has_models(d):
-            return d
+    held = {d: model_bytes(d) for d in (home, windows)}
+    if any(held.values()):
+        return max((home, windows), key=lambda d: held[d])  # ties go to ~/models
     return windows if not home.exists() and windows.is_dir() else home
 
 
-def has_models(d: Path) -> bool:
-    """d has a <repo>/ folder for a llama.cpp model in the registry (complete or not)."""
+def model_bytes(d: Path) -> int:
+    """Bytes of registry llama.cpp model files under d, counting unfinished downloads."""
     try:
-        return any((d / m.repo).is_dir() for m in MODELS.values() if m.server == "llama")
+        return sum(progress(m, d)["bytes"] for m in MODELS.values() if m.server == "llama")
     except OSError:
-        return False
+        return 0
 
 
 def on_drvfs(path: Path) -> bool:
