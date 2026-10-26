@@ -46,7 +46,7 @@ from .models.registry import GIB, MODELS, File, LocalModel, best, budget
 
 HOST = "127.0.0.1"
 PORT = 8000
-MODES = ("coop", "solo")
+MODES = ("coop", "solo", "max")  # max: no budget, only free VRAM (Raph not using the PC)
 BEST = "best"
 NAME = "model"  # pid file run/model.pid, log logs/model.log
 NVIDIA_SMI = ("/usr/lib/wsl/lib/nvidia-smi", "nvidia-smi")
@@ -616,7 +616,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("model", choices=list(MODELS))
     p = sub.add_parser("start", help="start a model server and wait until it answers")
     p.add_argument("model", choices=[BEST, *MODELS], help="a registry model, or 'best': the strongest downloaded one that fits")
-    p.add_argument("--mode", choices=MODES, required=True, help="co-op (13 GiB budget) or solo (20 GiB)")
+    p.add_argument("--mode", choices=MODES, required=True, help="co-op (13 GiB budget), solo (20 GiB), or max (all free VRAM, when Raph isn't using the PC)")
     p.add_argument("--port", type=int, default=PORT)
     p.add_argument("--force", action="store_true", help="start even if the VRAM check fails")
     p.add_argument("--timeout", type=float, default=START_TIMEOUT, help="seconds to wait for the server")

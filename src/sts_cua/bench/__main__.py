@@ -172,7 +172,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--game-build", help="recorded with the results (default: the builds of the targets' runs)")
     p.add_argument("--serve", action="store_true",
                    help="start each local model with `python -m sts_cua.serve start <model> --mode` first")
-    p.add_argument("--mode", choices=["coop", "solo"], default="solo", help="with --serve: the VRAM budget to start under")
+    p.add_argument("--mode", choices=["coop", "solo", "max"], default="solo", help="with --serve: the VRAM budget to start under")
     add_model_args(p)
 
     p = sub.add_parser("clicks", help="live clicks on tools/click_target.py (no game needed)")
@@ -188,11 +188,11 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("baseline", help="save GPU and RAM use before the model server starts")
     p.add_argument("--label", default="pre-server", choices=["pre-server", "desktop"],
                    help="pre-server: games running, no model server; desktop: before the games too")
-    p.add_argument("--mode", choices=["coop", "solo"])
+    p.add_argument("--mode", choices=["coop", "solo", "max"])
 
     p = sub.add_parser("resources", help="measure VRAM and RAM with the model server running")
     p.add_argument("model_name", metavar="model")
-    p.add_argument("--mode", choices=["coop", "solo"], required=True)
+    p.add_argument("--mode", choices=["coop", "solo", "max"], required=True)
     p.add_argument("--game", action="store_true", help="also record the game, Steam and Xvfb RSS")
     p.add_argument("--server-log", help="vLLM's log: weights and KV cache, for the activations row")
     p.add_argument("--serve", action="store_true", help="start it with `python -m sts_cua.serve start <model>` first")

@@ -6,7 +6,8 @@ model is added here first. Sizes are bytes from the Hugging Face API, read 2026-
 see docs/hosting.md ("Stronger options") for why each model is here.
 
 Budgets (docs/hosting.md): about 13 GiB free for the model in co-op (two game copies),
-about 20 GiB solo (one copy). `fits` checks file sizes plus a fixed allowance for the
+about 20 GiB solo (one copy), and "max" when Raph isn't using the PC: no fixed budget,
+only the VRAM measured free at start (capped at the card's 24 GiB). `fits` checks file sizes plus a fixed allowance for the
 KV cache and compute buffers; the real number is measured on the PC.
 """
 
@@ -17,6 +18,7 @@ from dataclasses import dataclass, field
 GIB = 2**30
 COOP_BUDGET_GIB = 13.0
 SOLO_BUDGET_GIB = 20.0
+MAX_BUDGET_GIB = 24.0  # the whole RTX 4090; in max mode the free-VRAM check is the real limit
 
 
 @dataclass(frozen=True)
@@ -100,7 +102,7 @@ MODELS: dict[str, LocalModel] = {m.name: m for m in (
 
 
 def budget(mode: str) -> float:
-    return COOP_BUDGET_GIB if mode == "coop" else SOLO_BUDGET_GIB
+    return {"coop": COOP_BUDGET_GIB, "max": MAX_BUDGET_GIB}.get(mode, SOLO_BUDGET_GIB)
 
 
 def best(free_gib: float, downloaded: set[str] | None = None) -> LocalModel | None:
