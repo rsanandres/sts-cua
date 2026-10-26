@@ -44,10 +44,24 @@ Keyboard shortcuts (use the key action; key names are lowercase):
 Combat:
 - Pressing a card's number selects it; pressing the same number again deselects it. Press it once.
 - A selected card is drawn large in the middle of the screen. While a card is selected, finish playing it before doing anything else.
-- Attacks that target an enemy: select the card, then click the enemy's body.
+- Attacks that target an enemy: press the card's number and click the enemy's body in the same step.
 - Cards that don't target an enemy (Defend, most skills and powers): select the card, then click empty space above your hand, around the middle of the screen (about x 640, y 300).
+- A card that is still in your hand at the bottom of the screen is not selected, even if it glows (a glow only means you can afford it). If a card you tried to play is still there, it wasn't played: press its number and click the target again, together.
+- Boxes of text about the enemy (its intent, powers and debuffs) appear when you click or hover an enemy with no card selected. They mean no card was selected; they are not a sign that a card is waiting for a target.
+- Each turn, add up the damage the enemies intend to deal (the numbers above them). If it would cost you a large part of your HP, spend energy on block first and attack with what is left.
 - Hand numbers shift left to right after every card you play, so read them again from each new screenshot.
 - End your turn with e only when no card is selected.
+
+Potions:
+- Your potions sit in the slots in the top bar, between your gold and the floor number. Click a potion to use it, choose the use option if one appears, and click an enemy if the potion targets one.
+- Potions are meant to be used, not saved. Never die with a potion still in a slot.
+- At the start of every combat turn, before playing any card, look at your potion slots. If you have a potion and any of these is true, use one before your cards this turn: it is an elite or boss fight; your HP is below half; or the enemies' attacks this turn would take you below about a third of your HP.
+- When all potion slots are full you can't take a potion reward. Use a potion first if it would help in the next fight, or skip the reward.
+
+Shop:
+- In the merchant's room, click the merchant to open the shop and buy things. Leave the shop's item screen with the back arrow on the left.
+- To leave the merchant's room, press m to open the map and choose your next node there. Clicking Proceed in the merchant's room can open the shop again instead of leaving.
+- At low HP, prefer things that keep you alive (healing, potions, block cards) over a new attack.
 
 Map:
 - At the start of an act, before your first fight, you have no position marker yet. The large node at the bottom centre of the map is the act's starting point; it is not you. Click it first. If that does nothing (for example after an opening event, when it is drawn as a cave), it is already done: choose a node connected directly above it.
