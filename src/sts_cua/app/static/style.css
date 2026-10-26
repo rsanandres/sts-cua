@@ -12,6 +12,8 @@
   --warn: #b7791f;
   --bad: #c53030;
   --bad-bg: #fdecec;
+  --ok-bg: #e7f6ed;
+  --warn-text: #8a5a12;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
   color-scheme: light dark;
 }
@@ -31,6 +33,8 @@
     --warn: #e0a440;
     --bad: #f06b6b;
     --bad-bg: #3a1d1f;
+    --ok-bg: #173323;
+    --warn-text: #e8b45c;
     --shadow: none;
   }
 }
@@ -55,6 +59,7 @@ code { font-size: 0.9em; word-break: break-all; }
 [hidden] { display: none !important; }
 
 .muted { color: var(--muted); }
+.warn-text { color: var(--warn-text); }
 .small { font-size: 0.85rem; }
 .center { text-align: center; }
 
@@ -262,8 +267,8 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
   body { font-size: 15px; }
   .top { padding: 0.5rem 0.75rem; gap: 0.5rem; }
   .brand { flex: 1; }
-  .tabs { order: 3; flex-basis: 100%; display: grid; grid-template-columns: repeat(4, 1fr); }
-  .tabs a { text-align: center; padding: 0.45rem 0.25rem; }
+  .tabs { order: 3; flex-basis: 100%; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0.15rem; }
+  .tabs a { text-align: center; padding: 0.45rem 0.1rem; font-size: 0.9rem; white-space: nowrap; }
   main { padding: 0.75rem; }
   .card { padding: 0.8rem; }
   .grid.three { grid-template-columns: minmax(0, 1fr); }
@@ -289,3 +294,49 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
 .eval-detail td, #evals-table td { overflow-wrap: anywhere; }
 .eval-detail ul { margin: 0.3rem 0 0; padding-left: 1.2rem; overflow-wrap: anywhere; }
 tr.selected { background: var(--surface-2); }
+
+/* Model server card: llama.cpp */
+.subsection { margin-top: 1rem; padding-top: 0.6rem; border-top: 1px solid var(--border); }
+.subsection h3 { margin-top: 0; }
+.subsection .buttons label.check { margin: 0; }
+
+/* Short log excerpts (install, bench job, docs diff) */
+.log-tail {
+  margin: 0.6rem 0 0; padding: 0.5rem 0.7rem; max-height: 12rem; overflow: auto;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+  font-size: 0.78rem; line-height: 1.35; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.log-tail.tall { max-height: 22rem; }
+.log-tail.diff .add { color: var(--ok); }
+.log-tail.diff .del { color: var(--bad); }
+.changed { margin-top: 0.6rem; }
+code.argv { display: block; margin-top: 0.2rem; color: var(--muted); font-size: 0.8rem; }
+
+/* Bake-off */
+.grid > .stack { display: grid; gap: 1rem; align-content: start; min-width: 0; }
+.grid > .stack > .card { margin-bottom: 0; }
+#tab-bench .grid.two { align-items: start; }
+.sheets { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 0.75rem; margin: 0.75rem 0; }
+.sheet { margin: 0; min-width: 0; }
+.sheet img { display: block; width: 100%; height: auto; border-radius: 6px; background: #000; }
+.sheet figcaption { margin-top: 0.2rem; }
+details > summary { cursor: pointer; font-weight: 600; margin: 0.4rem 0; }
+.target-list { list-style: none; margin: 0.3rem 0 0; padding: 0; max-height: 24rem; overflow: auto; border-top: 1px solid var(--border); }
+.target-list li { border-bottom: 1px solid var(--border); padding: 0.25rem 0; }
+.target-list label { margin: 0; align-items: flex-start; overflow-wrap: anywhere; }
+.target-list .nid, .model-check .mname, .baselines .mname { font-family: ui-monospace, Consolas, Menlo, monospace; font-size: 0.85em; }
+.target-list .nid { color: var(--muted); flex: none; }
+fieldset.models { border: 1px solid var(--border); border-radius: 8px; margin: 0 0 0.6rem; padding: 0.4rem 0.7rem 0.2rem; min-width: 0; }
+fieldset.models legend { font-size: 0.85rem; color: var(--muted); padding: 0 0.3rem; }
+.model-checks { display: grid; gap: 0.1rem; }
+.model-check { margin: 0; padding: 0.25rem 0; align-items: flex-start; }
+.model-check input { margin-top: 0.15rem; flex: none; }
+.model-check .mnote { display: block; }
+.model-check .badge { vertical-align: middle; }
+.baselines { list-style: none; margin: 0.3rem 0; padding: 0; font-size: 0.9rem; }
+.baselines li { padding: 0.15rem 0; overflow-wrap: anywhere; }
+.recommended { font-weight: 600; }
+.ranking { margin: 0.3rem 0 0.6rem; padding-left: 1.4rem; }
+.ranking li { overflow-wrap: anywhere; margin-bottom: 0.15rem; }
+.ranking .badge { margin-left: 0.3rem; }
+#bench-results td { overflow-wrap: anywhere; }

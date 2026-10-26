@@ -248,3 +248,180 @@ def test_model_server_card(stub, browser, tmp_path, name):
     state.downloading = None
     assert errors == []
     context.close()
+
+
+def wait_text(page, element_id, text):
+    page.wait_for_function(f"document.getElementById({element_id!r}).textContent.includes({text!r})")
+
+
+def confirm(page):
+    page.locator("#confirm").wait_for(state="visible")
+    page.click("#confirm-ok")
+
+
+@pytest.mark.parametrize("name", list(VIEWPORTS))
+def test_bench_tab(stub, browser, tmp_path, name):
+    base, state = stub
+    state.vllm, state.served = True, "holo4-27b"
+    context, page, errors = open_page(browser, base, VIEWPORTS[name])
+    page.click("a[data-tab=bench]")
+    page.wait_for_function("document.querySelectorAll('#bench-models input').length > 3")
+
+    # Job card: the last job's output, as text
+    wait_text(page, "bench-output", "<script>")
+    assert page.evaluate("window.__xss") is None
+    assert page.locator("#bench-stop").is_disabled()
+
+    # Targets: count, contact sheets, deletion behind a confirm
+    wait_text(page, "bench-target-count", "targets")
+    page.wait_for_function("[...document.querySelectorAll('#bench-sheets img')].length === 2 && "
+                           "[...document.querySelectorAll('#bench-sheets img')].every(i => i.naturalWidth > 0)")
+    page.click("#bench-delete-box summary")
+    page.fill("#bench-filter", "0007")
+    visible = page.locator("#bench-target-list li:visible")
+    assert visible.count() == 1 and "<script>" in visible.inner_text()
+    assert page.evaluate("window.__xss") is None
+    target = visible.get_attribute("data-target")
+    visible.locator("input").check()
+    assert page.locator("#bench-delete").inner_text() == "Delete 1 selected"
+    page.click("#bench-delete")
+    confirm(page)
+    wait_text(page, "bench-job-badge", "running")
+    assert ("/api/bench/delete", {"ids": [target]}) in state.calls
+    assert page.locator("#bench-grounding-run").is_disabled()
+    wait_text(page, "bench-job-badge", "finished")
+
+    # Grounding: a local model and a Claude reference (costs credits: confirm first)
+    page.check("#bench-models input[value='holo4-27b']")
+    page.check("#bench-models input[value='claude-haiku-5-5']")
+    assert page.locator("#bench-models label:has(input[value='claude-haiku-5-5']) .badge").inner_text() == "API credits"
+    wait_text(page, "bench-grounding-hint", "API credits")
+    page.uncheck("#bench-serve")
+    wait_text(page, "bench-grounding-hint", "Uses the running model server")
+    page.check("#bench-serve")
+    page.fill("#bench-limit", "10")
+    page.click("#bench-grounding-run")
+    confirm(page)
+    wait_text(page, "bench-job-badge", "running")
+    _, body = next((p, b) for p, b in reversed(state.calls) if p == "/api/bench/grounding")
+    assert body == {"models": ["holo4-27b", "claude-haiku-5-5"], "mode": "solo", "serve": True, "limit": 10}
+    wait_text(page, "bench-job-badge", "finished")
+
+    # Clicks, stopped half-way
+    page.select_option("#bench-clicks-model", "ui-venus-2-9b")
+    wait_text(page, "bench-clicks-hint", "serving holo4-27b, not ui-venus-2-9b")
+    page.select_option("#bench-clicks-model", "holo4-27b")
+    page.fill("#bench-clicks-n", "500")
+    page.click("#bench-clicks-run")
+    wait_text(page, "bench-job-badge", "running")
+    assert ("/api/bench/clicks", {"model": "holo4-27b", "n": 100}) in state.calls
+    page.click("#bench-stop")
+    wait_text(page, "bench-job-badge", "stopped")
+
+    # Resources: a baseline, then a measurement
+    assert "pre-server" in page.locator("#bench-baselines").inner_text()
+    page.click("#bench-baseline-desktop")
+    wait_text(page, "bench-job-badge", "running")
+    assert ("/api/bench/baseline", {"label": "desktop"}) in state.calls
+    wait_text(page, "bench-job-badge", "finished")
+    page.select_option("#bench-res-mode", "coop")
+    page.click("#bench-res-run")
+    wait_text(page, "bench-job-badge", "running")
+    assert ("/api/bench/resources", {"model": "holo4-27b", "mode": "coop", "game": True, "serve": False}) in state.calls
+    wait_text(page, "bench-job-badge", "finished")
+
+    # Results and Write to docs
+    page.wait_for_function("document.querySelectorAll('#bench-ranking li').length === 3")
+    assert "Recommended: co-op ui-venus-2-9b, solo holo4-27b" in page.locator("#bench-recommended").inner_text()
+    assert page.locator("#bench-grounding-table tbody tr").count() == 3
+    assert "17.4 GiB" in page.locator("#bench-res-table").inner_text()
+    page.click("#bench-write-docs")
+    confirm(page)
+    wait_text(page, "bench-changed", "ram_server")
+    assert "<script>" in page.locator("#bench-changed").inner_text()
+    assert page.evaluate("window.__xss") is None
+    assert page.locator("#bench-changed .add").count() == 1 and page.locator("#bench-changed .del").count() == 1
+
+    page.click("#logs-open")
+    page.select_option("#log-name", "bench")
+    wait_text(page, "log-text", "bench line 0")
+    page.keyboard.press("Escape")
+    no_horizontal_scroll(page)
+    page.screenshot(path=str(shots_dir(tmp_path) / f"ui-bench-{name}.png"), full_page=True)
+    assert errors == []
+    context.close()
+
+
+@pytest.mark.parametrize("name", list(VIEWPORTS))
+def test_llama_install_card(stub, browser, tmp_path, name):
+    base, state = stub
+    state.vllm, state.install_polls, state.install_last = True, 0, None
+    context, page, errors = open_page(browser, base, VIEWPORTS[name])
+    wait_text(page, "llama-line", "llama-server not found")
+    wait_text(page, "llama-hint", "Stop the model server first")
+    assert page.locator("#llama-install").is_disabled()
+    page.click("#model-stop")
+    page.wait_for_function("!document.getElementById('llama-install').disabled")
+    page.check("#llama-prebuilt")
+    page.click("#llama-install")
+    confirm(page)
+    wait_text(page, "llama-line", "Installing llama.cpp (prebuilt release)")
+    assert ("/api/llama/install", {"prebuilt": True}) in state.calls
+    wait_text(page, "llama-tail", "nvcc not found")
+    assert "<script>" in page.locator("#llama-tail").inner_text()
+    wait_text(page, "llama-hint", "failed (exit 1)")
+    assert "Prebuilt release" in page.locator("#llama-hint").inner_text()
+    assert page.evaluate("window.__xss") is None
+    no_horizontal_scroll(page)
+    page.screenshot(path=str(shots_dir(tmp_path) / f"ui-llama-{name}.png"), full_page=True)
+    state.vllm = True
+    assert errors == []
+    context.close()
+
+
+@pytest.mark.parametrize("name", list(VIEWPORTS))
+def test_run_local_options(stub, browser, tmp_path, name):
+    base, state = stub
+    state.vllm, state.served, state.running, state.coop = True, "holo4-27b", False, False
+    context, page, errors = open_page(browser, base, VIEWPORTS[name])
+    page.goto(f"{base}/#run")
+    page.wait_for_function("[...document.querySelectorAll('#run-model option')].some(o => o.value === 'ui-venus-2-9b')")
+    assert page.locator("#run-local").is_hidden() and page.locator("#run-claude").is_visible()
+
+    page.select_option("#run-model", "holo4-27b")
+    assert page.locator("#run-local").is_visible() and page.locator("#run-claude").is_hidden()
+    assert page.locator("#run-local-thinking option").first.inner_text() == "default (on)"
+    wait_text(page, "run-hint", "serving it")
+    page.select_option("#run-local-thinking", "off")
+    assert page.locator("#run-local-effort").is_disabled()
+    page.select_option("#run-local-thinking", "on")
+    page.select_option("#run-local-effort", "xhigh")
+    page.select_option("#run-model", "ui-venus-2-9b")
+    wait_text(page, "run-hint", "serving holo4-27b, not ui-venus-2-9b")
+    page.select_option("#run-model", "qwen3-vl-8b")
+    assert page.locator("#run-local-thinking").is_disabled() and page.locator("#run-local-effort").is_disabled()
+    page.select_option("#run-model", "holo4-27b")
+    page.select_option("#run-local-thinking", "on")
+    page.select_option("#run-local-effort", "xhigh")
+    page.click("#run-start")
+    page.wait_for_function("document.getElementById('toast').textContent.includes('Supervisor started')")
+    _, body = next((p, b) for p, b in reversed(state.calls) if p == "/api/runs/start")
+    assert (body["model"], body["local_thinking"], body["local_effort"]) == ("holo4-27b", "on", "xhigh")
+
+    page.select_option("#coop-model", "ui-venus-2-9b")
+    assert page.locator("#coop-thinking").is_hidden() and page.locator("#coop-local-thinking").is_visible()
+    assert page.locator("#coop-local-effort").is_disabled()  # co-op: thinking off unless asked
+    page.select_option("#coop-local-thinking", "on")
+    page.select_option("#coop-local-effort", "low")
+    page.click("#coop-start")
+    page.wait_for_function("document.getElementById('toast').textContent.includes('Co-op agent started')")
+    _, body = next((p, b) for p, b in reversed(state.calls) if p == "/api/coop/start")
+    assert (body["local_thinking"], body["local_effort"]) == ("on", "low")
+    page.click("#coop-stop")
+    page.select_option("#coop-model", "claude-haiku-5-5")  # don't leave a local model saved for the other tests
+    page.select_option("#run-model", "claude-haiku-5-5")
+    page.evaluate("localStorage.clear()")
+    state.running = True
+    no_horizontal_scroll(page)
+    assert errors == []
+    context.close()

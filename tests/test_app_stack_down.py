@@ -18,6 +18,7 @@ AGENT_RUNS = [
     "python -m sts_cua.memory reflect runs/20261025T164617Z",
     "python -m sts_cua",
     "python -m sts_cua.eval run memory-ab --display :99",
+    "/home/raph/sts-cua/.venv/bin/python -m sts_cua.bench grounding holo4-27b --serve --mode solo",
 ]
 NOT_AGENT = [
     "python -m sts_cua.app",
@@ -25,6 +26,7 @@ NOT_AGENT = [
     "python -m sts_cua.apps",
     "python -m sts_cua_other",
     "python -m sts_cua.evaluate",
+    "python -m sts_cua.benchmark",
     "vim src/sts_cua/supervisor.py",
     "bash tools/stack_down.sh",
 ]

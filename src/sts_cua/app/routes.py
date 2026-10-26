@@ -10,7 +10,6 @@ from __future__ import annotations
 import glob
 import io
 import json
-import math
 import os
 import re
 import shutil
@@ -33,7 +32,9 @@ from ..state import DEFAULT_URL, fetch_state, summarize
 from ..score import run_mode
 from ..supervisor import BUDGET_TZ, spent_today
 from . import files
+from .bench import BENCH, INSTALL, BenchRoutes, stop_jobs
 from .procs import RUN_PATTERN, ProcessManager
+from .validate import ApiError, Reply, _choice, _flag, _name, _number, _query_int  # noqa: F401 (re-exported)
 
 CLAUDE_MODELS = ("claude-haiku-5-5", "claude-sonnet-5-5")
 RUN_MODELS = (*CLAUDE_MODELS, *LOCAL_MODELS, "scripted")
@@ -80,22 +81,6 @@ class AppConfig:
         return self.repo / "runs"
 
 
-class ApiError(Exception):
-    def __init__(self, status: int, message: str):
-        super().__init__(message)
-        self.status = status
-        self.message = message
-
-
-@dataclass
-class Reply:
-    """A non-JSON response (images)."""
-
-    body: bytes
-    content_type: str
-    status: int = 200
-
-
 def capture_png(display: str) -> bytes:
     from ..screen import X11Screen
 
@@ -105,43 +90,33 @@ def capture_png(display: str) -> bytes:
     return buf.getvalue()
 
 
-# ---- validation
+# ---- argv builders
 
-def _choice(body: dict, key: str, options, default=None):
-    value = body.get(key, default)
-    if value not in options:
-        raise ApiError(400, f"{key} must be one of {', '.join(map(str, options))}")
-    return value
+LOCAL_THINKING = ("on", "off")  # --local-thinking
+LOCAL_EFFORTS = ("low", "medium", "xhigh")  # --local-effort (models/factory.py)
 
 
-def _number(body: dict, key: str, default, lo: float, hi: float, integer: bool = False):
-    """A JSON number clamped to [lo, hi]; null or missing gives default."""
-    value = body.get(key)
-    if value is None:
-        return default
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
-        raise ApiError(400, f"{key} must be a number")
-    if integer and value != int(value):
-        raise ApiError(400, f"{key} must be an integer")
-    value = min(max(value, lo), hi)
-    return int(value) if integer else float(value)
+def local_flags(body: dict, model: str, coop: bool) -> tuple[list[str], dict]:
+    """--local-thinking / --local-effort for a registry model, from "local_thinking" and "local_effort".
 
-
-def _query_int(query: dict, key: str, default: int, lo: int, hi: int) -> int:
-    raw = query.get(key)
-    if raw is None:
-        return default
-    try:
-        value = int(raw)
-    except ValueError:
-        raise ApiError(400, f"{key} must be an integer") from None
-    return min(max(value, lo), hi)
-
-
-def _name(value, what: str) -> str:
-    if not isinstance(value, str) or not files.safe_name(value):
-        raise ApiError(400, f"{what} must match {files.NAME_RE.pattern}")
-    return value
+    Both null (or missing) leave the factory's defaults: thinking off in co-op, else the registry's.
+    Effort needs thinking on, and neither applies to a model without a thinking mode or to Claude.
+    """
+    thinking = _choice(body, "local_thinking", (None, *LOCAL_THINKING))
+    effort = _choice(body, "local_effort", (None, *LOCAL_EFFORTS))
+    m = MODELS.get(model)
+    if m is None:
+        if thinking is not None or effort is not None:
+            raise ApiError(400, "local_thinking and local_effort are for local models only")
+        return [], {}
+    if not m.thinking and (thinking == "on" or effort is not None):
+        raise ApiError(400, f"{model} has no thinking mode")
+    thinking_on = thinking == "on" if thinking is not None else (False if coop else m.thinking)
+    if effort is not None and not thinking_on:
+        raise ApiError(400, "local_effort applies only with thinking on" +
+                       (" (co-op defaults to off)" if coop and thinking is None else ""))
+    argv = (["--local-thinking", thinking] if thinking else []) + (["--local-effort", effort] if effort else [])
+    return argv, {"local_thinking": thinking, "local_effort": effort}
 
 
 def supervisor_argv(body: dict, python: str, display: str) -> tuple[list[str], dict]:
@@ -158,10 +133,13 @@ def supervisor_argv(body: dict, python: str, display: str) -> tuple[list[str], d
     if build is not None:
         build = _name(build, "game_build")
 
+    local, local_settings = local_flags(body, model, coop=False)
+
     argv = [python, "-m", "sts_cua.supervisor", "--display", display, "--model", model,
             "--daily-budget", f"{budget:g}"]
     if model in CLAUDE_MODELS:
         argv += ["--thinking", thinking, "--effort", effort]
+    argv += local
     if max_runs is not None:
         argv += ["--max-runs", str(max_runs)]
     if build is not None:
@@ -169,7 +147,7 @@ def supervisor_argv(body: dict, python: str, display: str) -> tuple[list[str], d
     if memory:
         argv += ["--memory", MEMORY_STORE]
     settings = {"model": model, "thinking": thinking, "effort": effort, "daily_budget": budget,
-                "max_runs": max_runs, "memory": memory, "game_build": build}
+                "max_runs": max_runs, "memory": memory, "game_build": build, **local_settings}
     return argv, settings
 
 
@@ -190,16 +168,19 @@ def coop_argv(body: dict, python: str, display: str) -> tuple[list[str], dict]:
     if build is not None:
         build = _name(build, "game_build")
 
+    local, local_settings = local_flags(body, model, coop=True)
+
     argv = [python, "-m", "sts_cua", "--coop", "--display", display, "--model", model,
             "--max-cost", f"{max_cost:g}", "--coop-idle-minutes", f"{idle:g}"]
     if model in CLAUDE_MODELS:
         argv += ["--thinking", thinking, "--effort", effort]
+    argv += local
     if build is not None:
         argv += ["--game-build", build]
     if not rules:
         argv += ["--no-rules"]
     settings = {"model": model, "thinking": thinking, "effort": effort, "max_cost": max_cost,
-                "idle_minutes": idle, "rules": rules, "game_build": build}
+                "idle_minutes": idle, "rules": rules, "game_build": build, **local_settings}
     return argv, settings
 
 
@@ -246,7 +227,7 @@ def interop_env() -> dict[str, str]:
 # ---- the API
 
 @dataclass
-class App:
+class App(BenchRoutes):
     config: AppConfig
     procs: ProcessManager
     capture: Callable[[str], bytes] = capture_png
@@ -294,6 +275,9 @@ class App:
         model = p.managed(serve.NAME)
         if model and "ready_s" not in model and not self.probe(model.get("server", "llama"), model.get("port", self.config.model_port)):
             return "model_start"
+        for name in (BENCH, INSTALL):  # long jobs: the page keeps Stack down usable during them
+            if p.managed(name):
+                return name
         if p.managed("reflect"):
             return "reflect"
         return None
@@ -326,6 +310,8 @@ class App:
             "mod": self._mod(),
             "busy": self.busy(),
             "coop": self.procs.info("coop"),
+            "bench": self.procs.info(BENCH),
+            "install": self.procs.info(INSTALL),
         }
 
     # stack control
@@ -344,6 +330,7 @@ class App:
             raise ApiError(409, "the stack is already being stopped")
         # stack_up.sh waits in a loop and would run stack_down.sh again from its trap.
         self.procs.send("stack_up", signal.SIGKILL)
+        stop_jobs(self.procs)  # a bench job or llama.cpp install the app started (stack_down.sh gets the rest)
         self.procs.start("stack_down", ["bash", str(self.config.repo / "tools" / "stack_down.sh")],
                          cwd=self.config.repo, log_name="stack")
         return {"started": True}
@@ -380,6 +367,10 @@ class App:
         with self._lock:
             if self.procs.info(serve.NAME)["running"]:
                 raise ApiError(409, "a model server is already running; stop it first")
+            if self.procs.info(INSTALL)["running"]:
+                raise ApiError(409, "llama.cpp is being installed; wait for it to finish")
+            if self._bench_serving():
+                raise ApiError(409, "a bench job is starting model servers itself; stop it or wait")
             root = self._models_root()
             try:
                 m, reason = serve.choose(name, mode, serve.free_gib(self._gpu_reading()),
@@ -458,7 +449,8 @@ class App:
             "steam": Path("/tmp/steam.log"),  # tools/stack_up.sh
             "game": Path("/tmp/sts2.log"),  # game.GameConfig.log_path
         }
-        if name not in ("steam", "game", "model", "download", "vllm", "supervisor", "app", "stack", "reflect", "coop"):
+        if name not in ("steam", "game", "model", "download", "vllm", "supervisor", "app", "stack", "reflect", "coop",
+                        BENCH, INSTALL):
             raise ApiError(404, f"no log {name}")
         path = paths.get(name) or self.procs.log_path(name)
         lines = _query_int(query, "lines", 200, 1, 2000)
@@ -701,6 +693,13 @@ ROUTES = [
     ("POST", r"/api/memory/reflect", "reflect"),
     ("GET", r"/api/evals", "evals_list"),
     ("GET", r"/api/evals/" + _SEG.format("name"), "eval_detail"),
+    ("GET", r"/api/llama", "llama"),
+    ("POST", r"/api/llama/install", "llama_install"),
+    ("GET", r"/api/bench", "bench"),
+    ("GET", r"/api/bench/results", "bench_results"),
+    ("GET", r"/api/bench/review/" + _SEG.format("file"), "bench_sheet"),
+    ("POST", r"/api/bench/stop", "bench_stop"),
+    ("POST", r"/api/bench/(?P<action>extract|review|delete|grounding|baseline|resources|clicks|write-docs)", "bench_start"),
 ]
 COMPILED = [(method, re.compile(pattern + "$"), name) for method, pattern, name in ROUTES]
 OPEN = {"health"}  # no token needed

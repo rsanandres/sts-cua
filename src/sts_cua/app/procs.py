@@ -19,10 +19,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-# Agent runs: the harness (`python -m sts_cua ...`), the supervisor, the memory CLI and
-# the memory A/B evaluation, but not this app (`python -m sts_cua.app`).
+# Agent runs: the harness (`python -m sts_cua ...`), the supervisor, the memory CLI, the
+# memory A/B evaluation and the bake-off, but not this app (`python -m sts_cua.app`).
 # tools/stack_down.sh uses the same pattern.
-AGENT_PATTERN = r"python[0-9.]* -m sts_cua(\.supervisor|\.memory|\.eval)?( |$)"
+AGENT_PATTERN = r"python[0-9.]* -m sts_cua(\.supervisor|\.memory|\.eval|\.bench)?( |$)"
 # A game-playing run, for /api/live: the harness, the supervisor or an evaluation (which drives the supervisor).
 RUN_PATTERN = r"python[0-9.]* -m sts_cua(\.supervisor|\.eval run)?( |$)"
 SUPERVISOR_PATTERN = r"python[0-9.]* -m sts_cua\.(supervisor|eval run)( |$)"
@@ -34,6 +34,12 @@ COOP_PATTERN = r"python[0-9.]* -m sts_cua .*--coop( |$)"
 # The [ ] and [.] keep a pgrep running this pattern from matching its own command line.
 MODEL_PATTERN = r"vllm[ ]serve|vllm[.]entrypoints|^[^ ]*llama-server( |$)"
 VLLM_PATTERN = MODEL_PATTERN  # the old name
+# A bake-off job (python -m sts_cua.bench ...), whoever started it.
+BENCH_PATTERN = r"python[0-9.]* -m sts_cua[.]bench( |$)"
+# tools/install_llama_cpp.sh run by a shell (the app runs `bash <repo>/tools/install_llama_cpp.sh`;
+# from a terminal it shows as `/bin/bash tools/install_llama_cpp.sh`), not an editor open on it.
+# tools/stack_down.sh uses the same pattern.
+INSTALL_PATTERN = r"^([^ ]*/)?(ba)?sh [^ ]*install_llama_cpp[.]sh( |$)"
 
 
 def watches(display: str = ":99") -> dict[str, list[str]]:
@@ -45,6 +51,8 @@ def watches(display: str = ":99") -> dict[str, list[str]]:
         "model": ["-f", MODEL_PATTERN],
         "supervisor": ["-f", SUPERVISOR_PATTERN],
         "coop": ["-f", COOP_PATTERN],
+        "bench": ["-f", BENCH_PATTERN],
+        "install": ["-f", INSTALL_PATTERN],
     }
 
 
@@ -107,6 +115,7 @@ class ProcessManager:
     _handles: dict[str, subprocess.Popen] = field(default_factory=dict)
     _lock: threading.RLock = field(default_factory=threading.RLock)
     stopping: set[str] = field(default_factory=set)
+    exits: dict[str, int] = field(default_factory=dict)  # exit codes of children that ended (this app only)
 
     @property
     def run_dir(self) -> Path:
@@ -136,6 +145,7 @@ class ProcessManager:
                 log.flush()
                 proc = self.launcher(argv, cwd=cwd, env={**os.environ, **(env or {})}, log=log)
             self._handles[name] = proc
+            self.exits.pop(name, None)
             record = {"pid": proc.pid, "start_ticks": start_ticks(proc.pid), "started_at": stamp,
                       "argv": argv, "log": str(log_path), "log_offset": offset, **(extra or {})}
             self._pid_file(name).write_text(json.dumps(record) + "\n", encoding="utf-8")
@@ -155,6 +165,8 @@ class ProcessManager:
             else:
                 running = alive(record["pid"], record.get("start_ticks"))
             if not running:
+                if handle is not None and handle.pid == record.get("pid"):
+                    self.exits[name] = handle.returncode
                 self._handles.pop(name, None)
                 path.unlink(missing_ok=True)
                 return None
