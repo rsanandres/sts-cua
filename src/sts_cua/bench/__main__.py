@@ -60,7 +60,8 @@ def cmd_grounding(args) -> None:
 
     def before(name: str) -> None:
         if args.serve and name in registry.MODELS:
-            _serve(["start", name])
+            _serve(["stop"])  # one model server at a time on port 8000
+            _serve(["start", name, "--mode", args.mode])
             _wait_ready(args.base_url)
 
     result = grounding.run(args.models, targets, Path(args.bench_dir), args, game_build=args.game_build,
@@ -129,7 +130,7 @@ def cmd_resources(args) -> None:
               "model VRAM will be missing", file=sys.stderr)
     served_by = None
     if args.serve:
-        _serve(["start", args.model_name])
+        _serve(["start", args.model_name, "--mode", args.mode])
         _wait_ready(args.base_url)
         served_by = "sts_cua.serve"
         time.sleep(args.warmup)
@@ -170,7 +171,8 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--limit", type=int, help="first N targets only")
     p.add_argument("--game-build", help="recorded with the results (default: the builds of the targets' runs)")
     p.add_argument("--serve", action="store_true",
-                   help="start each local model with `python -m sts_cua.serve start <model>` first")
+                   help="start each local model with `python -m sts_cua.serve start <model> --mode` first")
+    p.add_argument("--mode", choices=["coop", "solo"], default="solo", help="with --serve: the VRAM budget to start under")
     add_model_args(p)
 
     p = sub.add_parser("clicks", help="live clicks on tools/click_target.py (no game needed)")
