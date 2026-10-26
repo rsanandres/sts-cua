@@ -118,14 +118,14 @@ Claude needs `ANTHROPIC_API_KEY` (or an `ant auth login` profile). Each run writ
 
 ### With the local model
 
-Start vLLM in WSL with the command in [docs/hosting.md](docs/hosting.md#model), then point the harness at it:
+Start the model server in WSL with `python -m sts_cua.serve start <model> --mode coop|solo` (or `start best`; `list`, `download`, `status` and `stop` too; see [docs/hosting.md](docs/hosting.md#serving-the-local-models)), or the vLLM command in [docs/hosting.md](docs/hosting.md#model). Then point the harness at it:
 
 ```
 .venv/bin/python -m sts_cua --display :99 --model qwen3-vl-8b --max-steps 20
 .venv/bin/python -m sts_cua --display :99 --model qwen3-vl-8b --base-url http://localhost:8000/v1 --served-model my-lora --temperature 0
 ```
 
-`--served-model` defaults to `Qwen/Qwen3-VL-8B-Instruct-FP8`, the name `vllm serve` gives it; pass a LoRA adapter's name to run that instead. Set `VLLM_API_KEY` if vLLM runs with `--api-key`. The adapter uses Qwen3-VL's own `computer_use` tool and `<tool_call>` format, with coordinates on a 0-1000 scale converted to screen pixels. Its steps cost $0, and each step's `raw` holds the request (screenshot replaced by a placeholder; it's saved next to the step), the reply text, token usage, per-token logprobs and token IDs, for building SFT and RL data later.
+`--served-model` defaults to `Qwen/Qwen3-VL-8B-Instruct-FP8`, the name `vllm serve` gives it; pass a LoRA adapter's name to run that instead. Set `VLLM_API_KEY` (or `LLAMA_API_KEY`) if the server runs with `--api-key`. The adapter uses Qwen3-VL's own `computer_use` tool and `<tool_call>` format, with coordinates on a 0-1000 scale converted to screen pixels. The other `--model` names in `src/sts_cua/models/registry.py` (`qwen3.8-27b`, `holo4-27b`, `ui-venus-2-9b`, ...) run on llama-server the same way, at the registry's served name. `--local-thinking on|off` switches their thinking mode (`chat_template_kwargs: {"enable_thinking": ...}`); left unset it is off in co-op and the registry's default otherwise, and `--local-effort low|medium|xhigh` sets the reasoning effort when it is on. Thinking text is logged as the step's `reasoning` and never shown to the model again. Its steps cost $0, and each step's `raw` holds the request (screenshot replaced by a placeholder; it's saved next to the step), the reply text, token usage, per-token logprobs and token IDs, for building SFT and RL data later.
 
 Code map:
 
@@ -134,6 +134,8 @@ Code map:
 - `src/sts_cua/models/factory.py`: `add_model_args(parser)` and `build_model(args)`, shared by every CLI that picks a model.
 - `src/sts_cua/models/claude.py`: Claude adapter on the `computer_toolset_20260801` tool. Each step is a fresh request (cached system prompt and tools, a text log of recent steps, the current screenshot), so nothing is replayed and cost per step stays flat.
 - `src/sts_cua/models/qwen.py`: Qwen3-VL adapter for vLLM's OpenAI-compatible server, the same fresh request each step.
+- `src/sts_cua/models/local.py`: the base the local adapters share (request, thinking switch, coordinate scaling, run-log fields including llama-server `timings`).
+- `src/sts_cua/models/qwen38.py`, `holo4.py`, `ui_venus.py`: adapters for the registry's Qwen3.8, Holo4 and UI-Venus-2 families, each in its model's own computer-use format (sources in each module's docstring). `factory.py` picks one by the model's registry `family`.
 - `src/sts_cua/screen.py`: `X11Screen` (mss capture, xdotool input) and `FakeScreen` for tests.
 - `src/sts_cua/runlog.py`, `src/sts_cua/pricing.py`: run logs and per-step cost.
 - `src/sts_cua/memory/`: lessons carried between runs (see "Memory across runs").
@@ -277,7 +279,7 @@ On Windows, `tools/windows/sts-cua-app.cmd` starts the server in WSL if it isn't
 
 - Stdlib only (`ThreadingHTTPServer`), bound to 127.0.0.1. Every `/api/` call except `/api/health` needs the token in `~/.sts-cua/app-token` (mode 600), as a Bearer header or the HttpOnly, SameSite=Strict cookie that `/login?token=...` sets. No localhost exemption, since `tailscale serve` traffic also arrives from localhost. POSTs must be JSON.
 - Fixed actions only: argv lists built from validated fields (model allowlist, clamped numbers, names matching `^[\w.-]+$`, paths kept inside `runs/`), never a command string from a request.
-- Children it starts (supervisor, vLLM, `stack_up.sh`, reflect) get pid files in `~/.sts-cua/run/`, so a restarted app still knows them, and log to `~/.sts-cua/logs/`. Processes started elsewhere are found with pgrep.
+- Children it starts (supervisor, the model server, model downloads, `stack_up.sh`, reflect) get pid files in `~/.sts-cua/run/`, so a restarted app still knows them, and log to `~/.sts-cua/logs/`. Processes started elsewhere are found with pgrep.
 - `tools/stack_down.sh` stops agent runs with a pattern that leaves `python -m sts_cua.app` running.
 - `src/sts_cua/app/`: `server.py` (HTTP, auth, static page), `routes.py` (endpoints), `procs.py` (processes), `files.py` (tailing logs, run dirs), `static/` (the page).
 

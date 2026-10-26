@@ -74,7 +74,7 @@ def test_screens(stub, browser, tmp_path, name):
     # Control
     page.locator("#procs .proc").nth(4).wait_for()
     assert page.locator("#procs .proc").count() == 5
-    assert "vllm" in page.locator("#procs").inner_text()
+    assert "model" in page.locator("#procs").inner_text()
     assert "GiB" in page.locator("#gpu-bar").inner_text()
     assert "Floor 3" in page.locator("#mod-line").inner_text()
     no_horizontal_scroll(page)
@@ -171,8 +171,8 @@ def test_screens(stub, browser, tmp_path, name):
     # Logs drawer
     page.click("#logs-open")
     page.wait_for_function("document.getElementById('log-text').textContent.includes('supervisor line 199 <tag>')")
-    page.select_option("#log-name", "vllm")
-    page.wait_for_function("document.getElementById('log-text').textContent.includes('vllm line 0')")
+    page.select_option("#log-name", "model")
+    page.wait_for_function("document.getElementById('log-text').textContent.includes('model line 0')")
     page.screenshot(path=str(out / f"ui-logs-{name}.png"))
     page.keyboard.press("Escape")
     assert page.locator("#logs").is_hidden()
@@ -205,5 +205,46 @@ def test_coop_section(stub, browser, tmp_path, name):
     assert page.locator("#coop-thinking").is_disabled()
     no_horizontal_scroll(page)
     page.screenshot(path=str(shots_dir(tmp_path) / f"ui-coop-{name}.png"), full_page=True)
+    assert errors == []
+    context.close()
+
+
+@pytest.mark.parametrize("name", list(VIEWPORTS))
+def test_model_server_card(stub, browser, tmp_path, name):
+    base, state = stub
+    state.vllm, state.downloading = True, None
+    context, page, errors = open_page(browser, base, VIEWPORTS[name])
+    page.wait_for_function("document.getElementById('model-served').textContent.includes('Serving holo4-27b')")
+    select = page.locator("#model-name")
+    page.wait_for_function("document.querySelectorAll('#model-name option').length > 3")
+    labels = select.locator("option").all_inner_texts()
+    assert labels[0].startswith("Best that fits")
+    holo = next(t for t in labels if t.startswith("holo4-27b"))
+    assert "rank 90" in holo and "16.6 GiB" in holo and "fits solo" in holo and "co-op" not in holo
+    venus = next(t for t in labels if t.startswith("ui-venus-2-9b"))
+    assert "fits co-op + solo" in venus
+    assert "not downloaded" in next(t for t in labels if t.startswith("qwen3.8-27b-q5"))
+    assert "ui-venus-2-9b" in page.locator("#model-info").inner_text()  # best for co-op now
+    assert page.locator("#model-start").is_disabled() and page.locator("#model-download").is_disabled()
+
+    page.click("#model-stop")
+    page.wait_for_function("document.getElementById('model-served').textContent.includes('No model server')")
+    page.select_option("#model-mode", "solo")
+    page.wait_for_function("!document.getElementById('model-start').disabled")
+    page.click("#model-start")
+    page.wait_for_function("document.getElementById('toast').textContent.includes('Starting holo4-27b (solo)')")
+    assert ("/api/model/start", {"model": "best", "mode": "solo"}) in state.calls
+
+    page.select_option("#model-name", "qwen3.8-27b-q5")
+    assert "<b>x</b>" in page.locator("#model-info").inner_text()  # notes are text, not HTML
+    assert not page.locator("#model-download").is_disabled()
+    page.click("#model-download")
+    page.wait_for_function("document.getElementById('toast').textContent.includes('Downloading qwen3.8-27b-q5')")
+    page.locator("#model-progress").wait_for(state="visible")
+    assert "Downloading qwen3.8-27b-q5" in page.locator("#model-progress").inner_text()
+    assert page.locator("#model-download").is_disabled()
+    no_horizontal_scroll(page)
+    page.screenshot(path=str(shots_dir(tmp_path) / f"ui-model-{name}.png"), full_page=True)
+    state.downloading = None
     assert errors == []
     context.close()

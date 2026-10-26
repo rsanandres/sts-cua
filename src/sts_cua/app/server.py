@@ -185,11 +185,16 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--state-dir", type=Path, default=home / ".sts-cua", help="pid files (run/) and logs (logs/)")
     parser.add_argument("--display", default=":99", help="the agent's X display")
     parser.add_argument("--vllm", help="vllm executable (default: <repo>/.venv/bin/vllm, else vllm on PATH)")
+    parser.add_argument("--llama-server", help="llama-server executable (default: $LLAMA_SERVER, "
+                        "~/llama.cpp/build/bin/llama-server, else PATH)")
+    parser.add_argument("--models-dir", type=Path, help="local models, <dir>/<repo>/<file> (default: $STS_CUA_MODELS, "
+                        "else ~/models, else /mnt/d/models if only it exists)")
     args = parser.parse_args(argv)
 
     config = AppConfig(repo=args.repo.expanduser().resolve(), state_dir=args.state_dir.expanduser(),
                        token_file=args.token_file.expanduser(), host=args.host, port=args.port,
-                       display=args.display, vllm=args.vllm)
+                       display=args.display, vllm=args.vllm, llama_server=args.llama_server,
+                       models_dir=args.models_dir.expanduser() if args.models_dir else None)
     config.state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     _setup_logging(config.state_dir / "logs")
     server = make_server(config)

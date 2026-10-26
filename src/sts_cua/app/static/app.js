@@ -4,7 +4,7 @@
 "use strict";
 
 (() => {
-  const PROCESSES = ["steam", "xvfb", "game", "vllm", "supervisor"];
+  const PROCESSES = ["steam", "xvfb", "game", "model", "supervisor"];
   const TABS = ["control", "run", "results", "memory"];
   const STEP_PAGE = 50;
   const SHOT_URL = /^\/api\/runs\/[\w.-]+\/screenshots\/[\w.-]+\.png$/;
@@ -170,7 +170,7 @@
   let pollTimer = null;
 
   const loops = {
-    control: { fn: () => refreshStatus(), ms: () => 3000 },
+    control: { fn: () => Promise.all([refreshStatus(), refreshModels()]), ms: () => 3000 },
     run: { fn: () => refreshLive(), ms: () => (liveRunning ? 2000 : 10000) },
   };
 
@@ -265,12 +265,102 @@
     const badge = $("busy-badge");
     badge.hidden = !busy;
     badge.textContent = busy ? `busy: ${busy}` : "";
-    for (const id of ["stack-up", "stack-down", "vllm-start", "vllm-stop"]) $(id).disabled = !!busy;
-    const vllmOn = !!(procs.vllm && procs.vllm.running);
-    if (!busy) {
-      $("vllm-start").disabled = vllmOn;
-      $("vllm-stop").disabled = !vllmOn;
+    for (const id of ["stack-up", "stack-down"]) $(id).disabled = !!busy;
+    renderModelButtons();
+  }
+
+  // ---------- Model server ----------
+
+  let lastModels = null;
+
+  async function refreshModels() {
+    try {
+      const data = await api("/api/models");
+      lastModels = data;
+      renderModels(data);
+      return data;
+    } catch (e) {
+      if (!(e instanceof AuthError)) setText("model-info", e.message);
+      throw e;
     }
+  }
+
+  function fitText(m) {
+    const fits = ["coop", "solo"].filter((mode) => m.fits && m.fits[mode]).map((mode) => (mode === "coop" ? "co-op" : "solo"));
+    return fits.length ? "fits " + fits.join(" + ") : "fits neither budget";
+  }
+
+  function modelLabel(m) {
+    return `${m.name} · rank ${m.rank} · ${m.file_gib.toFixed(1)} GiB · ${fitText(m)}${m.downloaded ? "" : " · not downloaded"}`;
+  }
+
+  function renderModels(data) {
+    const select = $("model-name");
+    const keep = select.value || "best";
+    const rows = data.models || [];
+    const options = [h("option", { value: "best", text: "Best that fits (strongest downloaded model)" }),
+      ...rows.map((m) => h("option", { value: m.name, text: modelLabel(m) }))];
+    const same = select.options.length === options.length
+      && [...select.options].every((o, i) => o.value === options[i].value && o.textContent === options[i].textContent);
+    if (!same) {
+      select.replaceChildren(...options);
+      select.value = rows.some((m) => m.name === keep) ? keep : "best";
+    }
+
+    const srv = data.server || {};
+    if (srv.running) {
+      const served = (srv.served && srv.served.length) ? srv.served.join(", ") : "loading...";
+      const which = srv.model && srv.model !== served ? `${srv.model}, ` : "";
+      setText("model-served", `Serving ${served} (${which}${dash(srv.mode)}) on port ${srv.port} · pid ${dash(srv.pid)}`);
+      $("model-served").className = "";
+    } else {
+      setText("model-served", "No model server running.");
+      $("model-served").className = "muted";
+    }
+    renderModelInfo();
+    renderModelButtons();
+  }
+
+  function selectedModel() {
+    const name = $("model-name").value;
+    return (lastModels && (lastModels.models || []).find((m) => m.name === name)) || null;
+  }
+
+  function renderModelInfo() {
+    if (!lastModels) return;
+    const mode = $("model-mode").value;
+    const m = selectedModel();
+    const g = lastModels.gpu;
+    const free = g ? `${gib(g.free_mib)} GiB VRAM free` : "free VRAM unknown";
+    let info;
+    if (!m) {
+      const pick = (lastModels.best || {})[mode];
+      info = pick ? `Now: ${pick} (the strongest downloaded model within ${free} and the ${mode === "coop" ? "co-op" : "solo"} budget).`
+        : `No downloaded model fits (${free}). Download one first.`;
+    } else {
+      info = `${m.server === "llama" ? "llama.cpp" : "vLLM"} · needs ${m.need_gib.toFixed(1)} GiB · ${free} · license ${dash(m.license)}. ${m.notes || ""}`;
+    }
+    setText("model-info", info);
+
+    const bar = $("model-progress");
+    const d = m && m.download;
+    if (d && (d.running || (d.bytes > 0 && d.bytes < d.total))) {
+      bar.hidden = false;
+      meter(bar, d.running ? `Downloading ${m.name}` : `${m.name}: partly downloaded`, d.bytes, d.total, (b) => (b / 2 ** 30).toFixed(1), " GiB");
+    } else {
+      bar.hidden = true;
+    }
+  }
+
+  function renderModelButtons() {
+    const busy = !!(lastStatus && lastStatus.busy);
+    const procs = (lastStatus && lastStatus.processes) || {};
+    const on = !!(procs.model && procs.model.running);
+    $("model-start").disabled = busy || on;
+    $("model-stop").disabled = busy || !on;
+    const m = selectedModel();
+    const downloading = !!(lastModels && lastModels.download && lastModels.download.running);
+    $("model-download").disabled = !m || m.downloaded || downloading;
   }
 
   function modLine(mod) {
@@ -290,19 +380,27 @@
     await post(ev.currentTarget, "/api/stack/down", {}, "Stopping the stack");
     refreshStatus().catch(() => {});
   });
-  $("vllm-start").addEventListener("click", async (ev) => {
-    const model = $("vllm-model").value;
-    await post(ev.currentTarget, "/api/vllm/start", { model }, `Starting vLLM (${model}); loading takes a minute or two`);
-    refreshStatus().catch(() => {});
+  $("model-name").addEventListener("change", () => { renderModelInfo(); renderModelButtons(); });
+  $("model-mode").addEventListener("change", renderModelInfo);
+  $("model-start").addEventListener("click", async (ev) => {
+    const body = { model: $("model-name").value, mode: $("model-mode").value };
+    const data = await post(ev.currentTarget, "/api/model/start", body);
+    if (data) toast(`Starting ${data.model} (${data.mode}); loading takes a minute or two`);
+    refreshStatus().then(refreshModels).catch(() => {});
   });
-  $("vllm-stop").addEventListener("click", async (ev) => {
-    await post(ev.currentTarget, "/api/vllm/stop", {}, "Stopping vLLM");
-    refreshStatus().catch(() => {});
+  $("model-stop").addEventListener("click", async (ev) => {
+    await post(ev.currentTarget, "/api/model/stop", {}, "Stopping the model server");
+    refreshStatus().then(refreshModels).catch(() => {});
+  });
+  $("model-download").addEventListener("click", async (ev) => {
+    const model = $("model-name").value;
+    await post(ev.currentTarget, "/api/model/download", { model }, `Downloading ${model} in the background`);
+    refreshModels().catch(() => {});
   });
   $("wsl-shutdown").addEventListener("click", async (ev) => {
     const ok = await confirmDialog(
       "Shut down WSL?",
-      "This runs wsl --shutdown: it stops any run, vLLM, the game, Steam and this app, and frees all of WSL's GPU memory and RAM for gaming on Windows. This page stops working until WSL and the app are started again from Windows.",
+      "This runs wsl --shutdown: it stops any run, the model server, the game, Steam and this app, and frees all of WSL's GPU memory and RAM for gaming on Windows. This page stops working until WSL and the app are started again from Windows.",
       "Shut down WSL",
     );
     if (!ok) return;
@@ -349,7 +447,7 @@
     $("run-thinking").disabled = !claude;
     $("run-effort").disabled = !claude;
     let hint = "";
-    if (model === "qwen3-vl-8b") hint = "Needs vLLM running (Control tab). Local runs cost nothing.";
+    if (model === "qwen3-vl-8b") hint = "Needs the model server running (Control tab). Local runs cost nothing.";
     else if (model === "scripted") hint = "Scripted runs make no model calls.";
     else hint = "Thinking and effort apply to Claude models only.";
     setText("run-hint", hint);
