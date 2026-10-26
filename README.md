@@ -283,6 +283,40 @@ On Windows, `tools/windows/sts-cua-app.cmd` starts the server in WSL if it isn't
 - `tools/stack_down.sh` stops agent runs with a pattern that leaves `python -m sts_cua.app` running.
 - `src/sts_cua/app/`: `server.py` (HTTP, auth, static page), `routes.py` (endpoints), `procs.py` (processes), `files.py` (tailing logs, run dirs), `static/` (the page).
 
+## Bake-off
+
+Which local model clicks best and fits next to the games: `python -m sts_cua.bench` (`src/sts_cua/bench/`). On the PC, from the repo:
+
+```
+# Targets, once (again after new Claude runs): clicks Claude made that changed the screen.
+.venv/bin/python -m sts_cua.bench extract
+.venv/bin/python -m sts_cua.bench review                       # look at bench/review/sheet-*.png
+.venv/bin/python -m sts_cua.bench review --delete 20261025T181542Z-0042 20261025T181542Z-0057
+
+# Memory, per model and mode. One model on the GPU at a time.
+.venv/bin/python -m sts_cua.bench baseline --label desktop     # before any game (co-op: gives the games' VRAM)
+tools/launch_sts2.sh /tmp/sts2.log                             # co-op: Raph's Windows copy too
+.venv/bin/python -m sts_cua.bench baseline                     # games up, model server not started yet
+.venv/bin/python -m sts_cua.serve start qwen3.8-27b            # or vllm serve / llama-server by hand
+.venv/bin/python -m sts_cua.bench resources qwen3.8-27b --mode solo --game
+.venv/bin/python -m sts_cua.bench resources qwen3-vl-8b --mode coop --game --server-log ~/.sts-cua/logs/vllm.log
+
+# Clicking, with the same server still up (--base-url if it isn't on localhost:8000).
+.venv/bin/python -m sts_cua.bench grounding qwen3.8-27b
+.venv/bin/python -m sts_cua.bench clicks qwen3.8-27b --xvfb --display :98 --n 20
+.venv/bin/python -m sts_cua.bench grounding claude-haiku-5-5   # reference; costs API credits
+
+# Tables, the ranking, and docs/hosting.md.
+.venv/bin/python -m sts_cua.bench report --write-docs
+```
+
+- **Targets** (`bench/targets.jsonl`, images in `bench/images/`, both in `.gitignore`): steps of Claude runs with exactly one left click (no key first, no co-op rule), whose next screenshot changed (`screen_diff` of at least 1.0). The instruction comes from the step's thought ("Click the End Turn button", "Play card 2 on the Nibbit"), with coordinates removed. Where the mod's state can tell, the click did what it says: ending a turn or playing a card changed the hand, energy or enemies, a map click left the map. A hit is a click within 40 px of Claude's click (at 1280x720). Deleted ids go to `bench/rejected.txt` and never come back.
+- **Grounding** builds each model with the factory, the prompt `prompts/grounding.txt`, the goal "Return only the click for: <instruction>", no history, temperature 0 for local models. Per target: hit, error in px, latency, tokens/s from llama-server's `timings`, and malformed replies (no click). Errors (server down) are counted apart; 3 in a row skip the rest of that model. `--serve` starts each local model with `python -m sts_cua.serve start <model>` first.
+- **Clicks** run `tools/click_target.py` on their own display (no game) and score N live clicks from `target.json`.
+- **Resources:** `nvidia-smi` used and total (the whole GPU, Windows included), the model's VRAM as used minus the pre-server baseline, WSL RAM from `/proc/meminfo`, the model server's RSS with its children, and with `--game` the game, Steam and Xvfb RSS.
+- **Results:** `runs/bench/<timestamp>/results.json` and `results.md`. `report` takes the newest result per model (per model and mode for memory) and ranks by hit rate, then median latency. The recommendation is the best-ranked local model whose VRAM fits the mode's budget in `models/registry.py` (measured, else the registry's estimate, marked "est.").
+- **`--write-docs`** rewrites the block between `<!-- bench:start -->` and `<!-- bench:end -->` in docs/hosting.md ("Measured on the PC"), and fills four **measure** rows only once they're measured: the activations row (from `--server-log`) and the two Spire copies row (co-op, needs the desktop baseline) in the VRAM budget, and the model-server and game RSS bullets in the RAM budget. Filled rows get a `<!-- bench:<row> -->` tag so later reports update them.
+
 ## Video footage
 
 The project history for the video lives in [docs/devlog.md](docs/devlog.md).
