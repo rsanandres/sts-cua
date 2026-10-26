@@ -286,7 +286,7 @@
   }
 
   function fitText(m) {
-    const fits = ["coop", "solo"].filter((mode) => m.fits && m.fits[mode]).map((mode) => (mode === "coop" ? "co-op" : "solo"));
+    const fits = ["coop", "solo", "max"].filter((mode) => m.fits && m.fits[mode]).map((mode) => (mode === "coop" ? "co-op" : mode));
     return fits.length ? "fits " + fits.join(" + ") : "fits neither budget";
   }
 
@@ -335,7 +335,7 @@
     let info;
     if (!m) {
       const pick = (lastModels.best || {})[mode];
-      info = pick ? `Now: ${pick} (the strongest downloaded model within ${free} and the ${mode === "coop" ? "co-op" : "solo"} budget).`
+      info = pick ? `Now: ${pick} (the strongest downloaded model within ${free} and the ${mode === "coop" ? "co-op" : mode} budget).`
         : `No downloaded model fits (${free}). Download one first.`;
     } else {
       info = `${m.server === "llama" ? "llama.cpp" : "vLLM"} · needs ${m.need_gib.toFixed(1)} GiB · ${free} · license ${dash(m.license)}. ${m.notes || ""}`;

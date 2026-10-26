@@ -24,10 +24,11 @@ def test_models_lists_the_registry(app_server):
     assert [r["rank"] for r in body["models"]] == sorted((m.rank for m in MODELS.values()), reverse=True)
     venus, holo = rows["ui-venus-2-9b"], rows["holo4-27b"]
     assert venus["downloaded"] and not holo["downloaded"]
-    assert venus["fits"] == {"coop": True, "solo": True} and holo["fits"] == {"coop": False, "solo": True}
+    assert venus["fits"] == {"coop": True, "solo": True, "max": True}
+    assert holo["fits"] == {"coop": False, "solo": True, "max": True}
     assert holo["file_gib"] == round(MODELS["holo4-27b"].file_gib, 2) and holo["rank"] == 90
     assert venus["download"]["bytes"] == venus["download"]["total"]
-    assert body["best"] == {"coop": "ui-venus-2-9b", "solo": "ui-venus-2-9b"}  # only one downloaded
+    assert body["best"] == {"coop": "ui-venus-2-9b", "solo": "ui-venus-2-9b", "max": "ui-venus-2-9b"}  # only one downloaded
     assert body["server"]["running"] is False and body["server"]["model"] is None
     assert body["gpu"]["free_mib"] == 20000
 
