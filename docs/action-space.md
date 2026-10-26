@@ -92,7 +92,7 @@ Seen in run 20261025T090109Z (Haiku vs Nibbit, first fight of Act 1).
 | `Down` | Release the selected card back to hand | Undo selection | keybind confirmed, effect untested |
 | `a` / `s` / `x` | Draw / discard / exhaust pile | Inspect | keybinds confirmed, views not yet seen |
 | `Space` | Peek | Inspect | keybind confirmed, effect not yet seen |
-| Potion slot, then Use / Discard, then target | Use or drop a potion | Commit | not yet seen |
+| Potion slot, then Drink, then target | Use a potion | Commit | confirmed: clicking a slot (≈(352,25)) opens a small menu with Drink just below it (≈(354,127)); Dexterity Potion drunk in run 20261026T000948Z, step 92. Escape with the menu open opens the pause menu instead (step 9). Discard option not yet seen |
 
 ### Known failure modes (first fight)
 
@@ -183,7 +183,7 @@ The agent votes last and follows the majority of the other players' votes (`sts_
 | Screen | Choices | Status |
 |---|---|---|
 | Rest site | Rest (heal), Smith (upgrade a card, then pick the card), other options from relics | unverified |
-| Shop | Buy a card, relic or potion; card removal; Leave | unverified |
+| Shop | Buy a card, relic or potion; card removal; Leave | confirmed: in the merchant's room, click the merchant to open the items; the back arrow ≈(45,520) closes them. Proceed ≈(1145,548) in the room reopened the items every time (run 20261025T194812Z, steps 269–278); `m`, then a map node, leaves (4 steps in run 20261025T232600Z) |
 | Event | Pick one of the listed options; Proceed | unverified |
 | Treasure | Open the chest, take the relic, Proceed | unverified |
 

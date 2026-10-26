@@ -53,9 +53,11 @@ Combat:
 - End your turn with e only when no card is selected.
 
 Potions:
-- Your potions sit in the slots in the top bar, between your gold and the floor number. Click a potion to use it, choose the use option if one appears, and click an enemy if the potion targets one.
+- Your potions sit in the slots in the top bar, between your gold and the floor number. Click a potion to open its menu, then click Drink just below it, and click an enemy if the potion targets one.
+- Once you open a potion's menu, drink it. Don't press Escape to close it: in combat that opens the pause menu.
 - Potions are meant to be used, not saved. Never die with a potion still in a slot.
-- At the start of every combat turn, before playing any card, look at your potion slots. If you have a potion and any of these is true, use one before your cards this turn: it is an elite or boss fight; your HP is below half; or the enemies' attacks this turn would take you below about a third of your HP.
+- At the start of every combat turn, before playing any card, look at your potion slots. If you have a potion and any of these is true, use one before your cards this turn: it is an elite or boss fight; your HP is below half; or the enemies' attacks this turn would take you below about a third of your HP. Check again every turn: drinking one potion early in a fight doesn't settle it for the rest of the fight.
+- Before you end a turn, compare the incoming damage with your HP plus block. If you might die or drop very low, drink every potion that could help (block, healing, weakening or damaging the enemy) before ending the turn.
 - When all potion slots are full you can't take a potion reward. Use a potion first if it would help in the next fight, or skip the reward.
 
 Shop:
